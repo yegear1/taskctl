@@ -23,6 +23,7 @@
 | [ADR-004](adr/004-remote-agent-canvas-contract-integration.md) | Remote Agent Canvas Contract Engine Integration & Maestri IPC | Approved | 2026-10-01 |
 | [ADR-005](adr/005-cross-repo-telemetry-aggregation-daemon.md) | Cross-Repository Telemetry Aggregation Daemon & Status Broadcaster | Approved | 2026-10-02 |
 | [ADR-006](adr/006-task-dependency-graph-engine.md) | Task Dependency Graph Engine, Visualizers, and Cycle Detection Policy | Approved | 2026-10-02 |
+| [ADR-007](adr/007-task-lifecycle-distributed-tracing.md) | Task Lifecycle Distributed Tracing, Telemetry Spans & SLA Alerting | Approved | 2026-10-02 |
 
 ---
 
@@ -63,6 +64,11 @@
 - **Decision:** Implement `TaskDependencyGraph` in `taskctl.core.graph` supporting explicit markdown prerequisites (`- **Depends On:**`, `(deps: ...)`), implicit sequential fallback for epics/subtasks, cycle detection via DFS coloring, ASCII tree visualization, Mermaid generation, and interactive TUI DAG view (`taskctl graph`, `taskctl ui --dag`).
 - **Consequences:** 100% hermetic DAG validation and visualization with zero non-standard external dependencies.
 
+### 2026-10-02 Task Lifecycle Distributed Tracing & Telemetry Spans
+- **Context:** Tracing multi-agent lifecycle phases, measuring operation latencies, and alerting on SLA violations without heavy external dependencies.
+- **Decision:** Implement W3C-compatible `TraceContext`, `Span`, `Tracer`, and `DurationAnalyzer` in `taskctl.telemetry.tracing`, auto-enriching `TelemetryEvent` and `VectorSink` payloads with `trace_id`, `span_id`, and `parent_span_id`, while triggering fail-safe `sla_alert` events on threshold breach (`taskctl trace`).
+- **Consequences:** Deterministic distributed tracing and SLA alerting across all CLI subcommands and agent hand-offs with zero third-party dependencies.
+
 ---
 
 ## Active Contracts
@@ -73,6 +79,7 @@
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
 | `taskctl graph` | `taskctl` | CLI / CI / Markdown Docs | ASCII Tree, Mermaid `graph TD`, JSON, or Exit Code (`0: Clean`, `1: Cycle`) |
+| `taskctl trace` | `taskctl` | CLI / CI / Developer | ASCII Waterfall Tree, Trace Spans JSON, or SLA duration analytics |
 | `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs NDJSON/JSON |

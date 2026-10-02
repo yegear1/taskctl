@@ -38,6 +38,8 @@ Commands:
                            workspaces and broadcast live events to Vector, Canvas, and Webhooks.
   taskctl broadcast [msg] [--watch <path>...] [--json]
                            Aggregate cross-repo status roll-up and broadcast to configured sinks.
+  taskctl trace [--last] [--id <trace_id>] [--json] [--analytics]
+                           Display distributed trace spans, waterfall tree, and SLA duration metrics.
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
 """
 
@@ -82,6 +84,10 @@ from taskctl.telemetry import (
     CrossRepoAggregator,
     TelemetryBroadcaster,
     TelemetryDaemon,
+    get_tracer,
+    TraceContext,
+    Span,
+    DurationAnalyzer,
 )
 from taskctl.tui import Dashboard
 
@@ -323,79 +329,85 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
     next_id = next_item["id"]
     next_title = next_item["title"]
 
-    best_profile, best_model, _ = route_target(weight=weight)
+    tracer = get_tracer()
+    with tracer.start_span("cli.next", tags={"task_id": next_id, "weight": weight}) as root_span:
+        best_profile, best_model, _ = route_target(weight=weight)
 
-    updated = content
-    old_task_pat = r"(### 📌 Task )\[([^\]]+)\]:\s*([^\n]+)"
-    updated = re.sub(old_task_pat, rf"\1[{next_id}]: {next_title}", updated, count=1)
+        updated = content
+        old_task_pat = r"(### 📌 Task )\[([^\]]+)\]:\s*([^\n]+)"
+        updated = re.sub(old_task_pat, rf"\1[{next_id}]: {next_title}", updated, count=1)
 
-    updated = re.sub(
-        r"(-\s*\*\*Runtime Target:\*\*)[^\n]+",
-        rf"\1 Profile '{best_profile}' | Model: '{best_model}'",
-        updated,
-        count=1
-    )
+        updated = re.sub(
+            r"(-\s*\*\*Runtime Target:\*\*)[^\n]+",
+            rf"\1 Profile '{best_profile}' | Model: '{best_model}'",
+            updated,
+            count=1
+        )
 
-    updated = re.sub(
-        r"(-\s*\*\*Status:\*\*)[^\n]+",
-        r"\1 RUNNING",
-        updated,
-        count=1
-    )
+        updated = re.sub(
+            r"(-\s*\*\*Status:\*\*)[^\n]+",
+            r"\1 RUNNING",
+            updated,
+            count=1
+        )
 
-    backlog_line_pat = rf"-\s*\[ \]\s*(?:\*\*|`)?\[{re.escape(next_id)}\](?:\*\*|`)?\s*[^\n]*\n?"
-    updated = re.sub(backlog_line_pat, "", updated)
+        backlog_line_pat = rf"-\s*\[ \]\s*(?:\*\*|`)?\[{re.escape(next_id)}\](?:\*\*|`)?\s*[^\n]*\n?"
+        updated = re.sub(backlog_line_pat, "", updated)
 
-    with open(task_file, "w", encoding="utf-8") as f:
-        f.write(updated)
+        with open(task_file, "w", encoding="utf-8") as f:
+            f.write(updated)
 
-    print(f"\n[OK] Promoted [{next_id}] '{next_title}' to Active Task (Status: RUNNING).")
-    print(f"[Quota Route] Profile: {best_profile} | Model: {best_model} (Weight: {weight})")
+        print(f"\n[OK] Promoted [{next_id}] '{next_title}' to Active Task (Status: RUNNING).")
+        print(f"[Quota Route] Profile: {best_profile} | Model: {best_model} (Weight: {weight})")
 
-    sync_task_cockpit_note(updated)
+        sync_task_cockpit_note(updated)
 
-    webhook = WebhookDispatcher()
-    webhook.send_event(
-        event_type="task_started",
-        task_id=next_id,
-        title=next_title,
-        status="RUNNING",
-        details={"actor": f"{best_profile} ({best_model})"}
-    )
+        webhook = WebhookDispatcher()
+        webhook.send_event(
+            event_type="task_started",
+            task_id=next_id,
+            title=next_title,
+            status="RUNNING",
+            details={"actor": f"{best_profile} ({best_model})"}
+        )
 
-    get_telemetry_emitter().emit_lifecycle_event(
-        event_type="task_started",
-        task_id=next_id,
-        message=f"Task [{next_id}] promoted to RUNNING: {next_title}",
-        status="RUNNING",
-        details={
-            "actor": f"{best_profile} ({best_model})",
-            "weight": weight,
-            "profile": best_profile,
-            "model": best_model,
-        },
-    )
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="task_started",
+            task_id=next_id,
+            message=f"Task [{next_id}] promoted to RUNNING: {next_title}",
+            status="RUNNING",
+            trace_id=root_span.trace_id,
+            span_id=root_span.span_id,
+            parent_span_id=root_span.parent_span_id,
+            details={
+                "actor": f"{best_profile} ({best_model})",
+                "weight": weight,
+                "profile": best_profile,
+                "model": best_model,
+            },
+        )
 
-    if handoff:
-        promoted_active, _ = parse_task_md(updated)
-        task_data = {
-            "task_id": next_id,
-            "title": next_title,
-            "status": "RUNNING",
-            "target_profile": best_profile,
-            "target_model": best_model,
-            "description": promoted_active.get("description", "") if promoted_active else "",
-            "systems": promoted_active.get("systems", "") if promoted_active else "",
-            "criteria": promoted_active.get("criteria", []) if promoted_active else [],
-            "runtime_target": f"Profile '{best_profile}' | Model: '{best_model}'",
-        }
-        h_res = handoff_task_start(task_data, target_agent=target_agent)
-        if h_res.delivered:
-            print(f"[Hand-off] Successfully dispatched context to canvas agent '{h_res.target_agent}'.")
-            if h_res.response:
-                print(f"            Response: {h_res.response}")
-        else:
-            print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
+        if handoff:
+            promoted_active, _ = parse_task_md(updated)
+            task_data = {
+                "task_id": next_id,
+                "title": next_title,
+                "status": "RUNNING",
+                "target_profile": best_profile,
+                "target_model": best_model,
+                "description": promoted_active.get("description", "") if promoted_active else "",
+                "systems": promoted_active.get("systems", "") if promoted_active else "",
+                "criteria": promoted_active.get("criteria", []) if promoted_active else [],
+                "runtime_target": f"Profile '{best_profile}' | Model: '{best_model}'",
+            }
+            with tracer.start_span("provider.handoff_start", tags={"task_id": next_id}):
+                h_res = handoff_task_start(task_data, target_agent=target_agent)
+            if h_res.delivered:
+                print(f"[Hand-off] Successfully dispatched context to canvas agent '{h_res.target_agent}'.")
+                if h_res.response:
+                    print(f"            Response: {h_res.response}")
+            else:
+                print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
 
 def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
     from pathlib import Path
@@ -410,74 +422,83 @@ def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
         except Exception:
             pass
 
-    mode_label = f" [HYBRID / DELEGATED to {agent_name or 'Auditor'}]" if delegate else ""
-    print("\n" + "="*58)
-    print(f" 🛡️ SCOPE AUDITOR VERIFICATION{mode_label}")
-    print("="*58)
+    tracer = get_tracer()
+    with tracer.start_span("cli.audit", tags={"task_id": active_task.get("id", "XX.Y"), "hybrid": delegate}) as root_span:
+        mode_label = f" [HYBRID / DELEGATED to {agent_name or 'Auditor'}]" if delegate else ""
+        print("\n" + "="*58)
+        print(f" 🛡️ SCOPE AUDITOR VERIFICATION{mode_label}")
+        print("="*58)
 
-    start_audit = time.perf_counter()
-    auditor = ScopeAuditor(hybrid=delegate, agent_name=agent_name)
-    verdict = auditor.run(repo_path)
-    audit_duration_ms = (time.perf_counter() - start_audit) * 1000.0
+        start_audit = time.perf_counter()
+        auditor = ScopeAuditor(hybrid=delegate, agent_name=agent_name)
+        verdict = auditor.run(repo_path)
+        audit_duration_ms = (time.perf_counter() - start_audit) * 1000.0
 
-    for res in verdict.results:
-        if res.severity == AuditSeverity.APPROVED:
-            icon = "✅ [PASS]"
-        elif res.severity == AuditSeverity.CHANGES_REQUIRED:
-            icon = "⚠️  [WARN]"
-        else:
-            icon = "❌ [FAIL]"
-        print(f" {icon} {res.rule_name}: {res.message}")
+        for res in verdict.results:
+            if res.severity == AuditSeverity.APPROVED:
+                icon = "✅ [PASS]"
+            elif res.severity == AuditSeverity.CHANGES_REQUIRED:
+                icon = "⚠️  [WARN]"
+            else:
+                icon = "❌ [FAIL]"
+            print(f" {icon} {res.rule_name}: {res.message}")
 
-    print("-" * 58)
-    print(f" FINAL VERDICT: [{verdict.status}] (exit code {verdict.exit_code})")
-    print("=" * 58 + "\n")
+        print("-" * 58)
+        print(f" FINAL VERDICT: [{verdict.status}] (exit code {verdict.exit_code})")
+        print("=" * 58 + "\n")
 
-    webhook = WebhookDispatcher()
-    webhook.send_event(
-        event_type="audit",
-        task_id=active_task.get("id", "XX.Y"),
-        title=active_task.get("title", "Ad-hoc task"),
-        status=verdict.status,
-        details={
-            "exit_code": verdict.exit_code,
-            "rule_count": len(verdict.results),
-            "hybrid": delegate,
-            "agent": agent_name,
-            "rules": [
-                {
-                    "rule": r.rule_name,
-                    "status": r.severity.label,
-                    "message": r.message,
-                }
-                for r in verdict.results
-            ],
-        },
-    )
+        root_span.set_status("OK" if verdict.exit_code == 0 else "ERROR", verdict.status)
+        root_span.set_tag("exit_code", verdict.exit_code)
+        root_span.set_tag("rule_count", len(verdict.results))
 
-    get_telemetry_emitter().emit_lifecycle_event(
-        event_type="audit",
-        task_id=active_task.get("id", "XX.Y"),
-        message=f"Scope Auditor finished with verdict: [{verdict.status}] (exit code {verdict.exit_code}) in {audit_duration_ms:.2f}ms",
-        status=verdict.status,
-        duration_ms=audit_duration_ms,
-        level="info" if verdict.exit_code == 0 else "warn",
-        details={
-            "exit_code": verdict.exit_code,
-            "rule_count": len(verdict.results),
-            "hybrid": delegate,
-            "agent": agent_name,
-            "rules": [
-                {
-                    "rule": r.rule_name,
-                    "status": r.severity.label,
-                    "message": r.message,
-                }
-                for r in verdict.results
-            ],
-        },
-    )
-    return verdict.exit_code
+        webhook = WebhookDispatcher()
+        webhook.send_event(
+            event_type="audit",
+            task_id=active_task.get("id", "XX.Y"),
+            title=active_task.get("title", "Ad-hoc task"),
+            status=verdict.status,
+            details={
+                "exit_code": verdict.exit_code,
+                "rule_count": len(verdict.results),
+                "hybrid": delegate,
+                "agent": agent_name,
+                "rules": [
+                    {
+                        "rule": r.rule_name,
+                        "status": r.severity.label,
+                        "message": r.message,
+                    }
+                    for r in verdict.results
+                ],
+            },
+        )
+
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="audit",
+            task_id=active_task.get("id", "XX.Y"),
+            message=f"Scope Auditor finished with verdict: [{verdict.status}] (exit code {verdict.exit_code}) in {audit_duration_ms:.2f}ms",
+            status=verdict.status,
+            duration_ms=audit_duration_ms,
+            level="info" if verdict.exit_code == 0 else "warn",
+            trace_id=root_span.trace_id,
+            span_id=root_span.span_id,
+            parent_span_id=root_span.parent_span_id,
+            details={
+                "exit_code": verdict.exit_code,
+                "rule_count": len(verdict.results),
+                "hybrid": delegate,
+                "agent": agent_name,
+                "rules": [
+                    {
+                        "rule": r.rule_name,
+                        "status": r.severity.label,
+                        "message": r.message,
+                    }
+                    for r in verdict.results
+                ],
+            },
+        )
+        return verdict.exit_code
 
 def cmd_lint_commit(
     msg: Optional[str] = None,
@@ -614,95 +635,104 @@ def cmd_done(
     task_id = active_task.get("id", "XX.Y")
     title = active_task.get("title", "Ad-hoc task")
 
-    # Step 1: Feature commit
-    staged = run_cmd("git diff --cached --name-only").stdout.strip().splitlines()
-    staged = [f.strip() for f in staged if f.strip() and not f.endswith(".agent/TASK.md")]
+    tracer = get_tracer()
+    with tracer.start_span("cli.done", tags={"task_id": task_id, "promote": promote}) as root_span:
+        # Step 1: Feature commit
+        staged = run_cmd("git diff --cached --name-only").stdout.strip().splitlines()
+        staged = [f.strip() for f in staged if f.strip() and not f.endswith(".agent/TASK.md")]
 
-    commit_hash = "HEAD"
-    if staged:
-        commit_msg = custom_msg or f"feat(task): resolve [{task_id}] {title}"
-        val = parse_conventional_commit(commit_msg)
-        if not val.is_valid:
-            print("\n" + "="*58)
-            print(" ❌ [ERROR] Commit message violates Conventional Commits:")
-            for err in val.errors:
-                print(f"   - {err}")
-            print("\n Schema Requirement: <type>[optional scope][!]: <description>")
-            print(" Standard Types     : feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert")
-            print("="*58)
-            print("Aborting commit. Please supply a valid Conventional Commit message.\n")
-            return
-        run_cmd(f'git commit -m "{commit_msg}"', check=True)
-        commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
-        print(f"[COMMIT 1/2] Feature commit created: {commit_hash} - {commit_msg}")
-    else:
-        commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
-        print(f"[INFO] No staged feature changes detected; linking task [{task_id}] to commit: {commit_hash}")
-
-    # Step 2: Update TASK.md completed log
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    log_entry = f"| [{task_id}] | {title} | [`{commit_hash}`] | {today} |\n"
-
-    updated = content
-    if "## Completed Tasks Log" in updated:
-        lines = updated.split("\n")
-        idx = -1
-        for i, l in enumerate(lines):
-            if "|---|" in l:
-                idx = i
-                break
-        if idx != -1:
-            lines.insert(idx + 1, log_entry.strip())
-            updated = "\n".join(lines)
-
-    # Reset active task
-    updated = re.sub(r"(### 📌 Task )\[([^\]]+)\]:\s*([^\n]+)", r"\1[XX.Y]: [Short descriptive title]", updated, count=1)
-    updated = re.sub(r"(-\s*\*\*Status:\*\*)[^\n]+", r"\1 READY FOR PLANNING", updated, count=1)
-
-    with open(task_file, "w", encoding="utf-8") as f:
-        f.write(updated)
-
-    gov_msg = f"docs(task): log completion of [{task_id}] and reset active task"
-    run_cmd("git add ':(top).agent/TASK.md'", check=True)
-    run_cmd(f'git commit -m "{gov_msg}"', check=True)
-    gov_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
-    print(f"[COMMIT 2/2] Governance commit created: {gov_hash}")
-
-    sync_task_cockpit_note(updated)
-
-    webhook = WebhookDispatcher()
-    webhook.send_event(
-        event_type="task_completed",
-        task_id=task_id,
-        title=title,
-        status="DONE",
-        details={"commit": commit_hash, "governance_commit": gov_hash}
-    )
-
-    get_telemetry_emitter().emit_lifecycle_event(
-        event_type="task_completed",
-        task_id=task_id,
-        message=f"Task [{task_id}] marked DONE: {title}",
-        status="DONE",
-        details={"commit": commit_hash, "governance_commit": gov_hash},
-    )
-
-    if handoff:
-        task_data = {
-            "task_id": task_id,
-            "title": title,
-            "status": "DONE",
-            "commit_hash": commit_hash,
-            "governance_commit": gov_hash,
-            "notify_planner": notify_planner,
-        }
-        h_res = handoff_task_done(task_data, target_agent=target_agent)
-        if h_res.delivered:
-            print(f"[Hand-off] Completion context dispatched to canvas agent '{h_res.target_agent}'.")
-            if h_res.response:
-                print(f"            Response: {h_res.response}")
+        commit_hash = "HEAD"
+        if staged:
+            commit_msg = custom_msg or f"feat(task): resolve [{task_id}] {title}"
+            val = parse_conventional_commit(commit_msg)
+            if not val.is_valid:
+                print("\n" + "="*58)
+                print(" ❌ [ERROR] Commit message violates Conventional Commits:")
+                for err in val.errors:
+                    print(f"   - {err}")
+                print("\n Schema Requirement: <type>[optional scope][!]: <description>")
+                print(" Standard Types     : feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert")
+                print("="*58)
+                print("Aborting commit. Please supply a valid Conventional Commit message.\n")
+                root_span.set_status("ERROR", "Invalid commit message")
+                return
+            with tracer.start_span("git.feature_commit", tags={"task_id": task_id}):
+                run_cmd(f'git commit -m "{commit_msg}"', check=True)
+            commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
+            print(f"[COMMIT 1/2] Feature commit created: {commit_hash} - {commit_msg}")
         else:
-            print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
+            commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
+            print(f"[INFO] No staged feature changes detected; linking task [{task_id}] to commit: {commit_hash}")
+
+        # Step 2: Update TASK.md completed log
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        log_entry = f"| [{task_id}] | {title} | [`{commit_hash}`] | {today} |\n"
+
+        updated = content
+        if "## Completed Tasks Log" in updated:
+            lines = updated.split("\n")
+            idx = -1
+            for i, l in enumerate(lines):
+                if "|---|" in l:
+                    idx = i
+                    break
+            if idx != -1:
+                lines.insert(idx + 1, log_entry.strip())
+                updated = "\n".join(lines)
+
+        # Reset active task
+        updated = re.sub(r"(### 📌 Task )\[([^\]]+)\]:\s*([^\n]+)", r"\1[XX.Y]: [Short descriptive title]", updated, count=1)
+        updated = re.sub(r"(-\s*\*\*Status:\*\*)[^\n]+", r"\1 READY FOR PLANNING", updated, count=1)
+
+        with open(task_file, "w", encoding="utf-8") as f:
+            f.write(updated)
+
+        gov_msg = f"docs(task): log completion of [{task_id}] and reset active task"
+        with tracer.start_span("git.governance_commit", tags={"task_id": task_id}):
+            run_cmd("git add ':(top).agent/TASK.md'", check=True)
+            run_cmd(f'git commit -m "{gov_msg}"', check=True)
+        gov_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
+        print(f"[COMMIT 2/2] Governance commit created: {gov_hash}")
+
+        sync_task_cockpit_note(updated)
+
+        webhook = WebhookDispatcher()
+        webhook.send_event(
+            event_type="task_completed",
+            task_id=task_id,
+            title=title,
+            status="DONE",
+            details={"commit": commit_hash, "governance_commit": gov_hash}
+        )
+
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="task_completed",
+            task_id=task_id,
+            message=f"Task [{task_id}] marked DONE: {title}",
+            status="DONE",
+            trace_id=root_span.trace_id,
+            span_id=root_span.span_id,
+            parent_span_id=root_span.parent_span_id,
+            details={"commit": commit_hash, "governance_commit": gov_hash},
+        )
+
+        if handoff:
+            task_data = {
+                "task_id": task_id,
+                "title": title,
+                "status": "DONE",
+                "commit_hash": commit_hash,
+                "governance_commit": gov_hash,
+                "notify_planner": notify_planner,
+            }
+            with tracer.start_span("provider.handoff_done", tags={"task_id": task_id}):
+                h_res = handoff_task_done(task_data, target_agent=target_agent)
+            if h_res.delivered:
+                print(f"[Hand-off] Completion context dispatched to canvas agent '{h_res.target_agent}'.")
+                if h_res.response:
+                    print(f"            Response: {h_res.response}")
+            else:
+                print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
 
     if promote:
         cmd_next(weight=weight, target_agent=target_agent, handoff=handoff)
@@ -974,6 +1004,54 @@ def cmd_broadcast(
         vector_status = "sent" if results.get("vector") else "skipped/unconfigured"
         webhook_status = "sent" if results.get("webhook") else "skipped/unconfigured"
         print(f"[OK] Broadcaster dispatched summary (Canvas: {canvas_status}, Vector: {vector_status}, Webhook: {webhook_status}).")
+    return 0
+
+def cmd_trace(
+    trace_id: Optional[str] = None,
+    last: bool = False,
+    json_output: bool = False,
+    analytics: bool = False,
+) -> int:
+    import json
+    tracer = get_tracer()
+    spans = tracer.get_completed_spans()
+
+    if not spans:
+        print("[INFO] No telemetry spans currently in memory.")
+        return 0
+
+    target_trace_id = trace_id
+    if not target_trace_id and last:
+        target_trace_id = spans[-1].trace_id
+
+    selected_spans = tracer.get_completed_spans(trace_id=target_trace_id) if target_trace_id else spans
+
+    if json_output:
+        payload = [s.to_dict() for s in selected_spans]
+        if analytics:
+            stats = DurationAnalyzer.analyze_spans(selected_spans)
+            print(json.dumps({"trace_id": target_trace_id, "analytics": stats, "spans": payload}, indent=2))
+        else:
+            print(json.dumps(payload, indent=2))
+        return 0
+
+    print("\n" + "=" * 58)
+    print(f" ⏱️  DISTRIBUTED TRACE INSPECTOR")
+    if target_trace_id:
+        print(f" Trace ID: {target_trace_id}")
+    print("=" * 58)
+    print(DurationAnalyzer.render_tree(selected_spans))
+
+    if analytics:
+        stats = DurationAnalyzer.analyze_spans(selected_spans)
+        print("-" * 58)
+        print(f" Total Spans    : {stats['total_spans']}")
+        print(f" Total Duration : {stats['total_duration_ms']:.2f}ms")
+        print(f" Avg Duration   : {stats['avg_duration_ms']:.2f}ms")
+        print(f" Max Duration   : {stats['max_duration_ms']:.2f}ms")
+        print(f" Min Duration   : {stats['min_duration_ms']:.2f}ms")
+
+    print("=" * 58 + "\n")
     return 0
 
 def main():
@@ -1272,6 +1350,37 @@ def main():
             broadcast_canvas=broadcast_canvas,
             broadcast_vector=broadcast_vector,
             broadcast_webhook=broadcast_webhook,
+        ))
+    elif cmd == "trace":
+        trace_id = None
+        last = False
+        json_output = False
+        analytics = False
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--id", "-i"] and i + 1 < len(args):
+                trace_id = args[i + 1]
+                i += 2
+            elif args[i] in ["--last", "-l"]:
+                last = True
+                i += 1
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["--analytics", "-a"]:
+                analytics = True
+                i += 1
+            elif not args[i].startswith("-") and trace_id is None:
+                trace_id = args[i]
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_trace(
+            trace_id=trace_id,
+            last=last,
+            json_output=json_output,
+            analytics=analytics,
         ))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
