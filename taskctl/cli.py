@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md
+from taskctl.core.auditor import ScopeAuditor, AuditSeverity
 from taskctl.providers.multigravity import get_profile_quotas, route_target
 from taskctl.providers.maestri import (
     resolve_maestri_cli,
@@ -244,33 +245,58 @@ def cmd_next(weight: str = "medium"):
     )
 
 def cmd_audit() -> int:
+    from pathlib import Path
+    repo_path = Path(find_repo_root())
     task_file = get_task_file()
-    with open(task_file, "r", encoding="utf-8") as f:
-        content = f.read()
-    active_task, _ = parse_task_md(content)
+    active_task = {"id": "XX.Y", "title": "Ad-hoc task"}
+    if os.path.exists(task_file):
+        try:
+            with open(task_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            active_task, _ = parse_task_md(content)
+        except Exception:
+            pass
 
-    print("\n" + "="*50)
+    print("\n" + "="*58)
     print(" 🛡️ SCOPE AUDITOR VERIFICATION")
-    print("="*50)
+    print("="*58)
 
-    # Check git diff --check
-    diff_check = run_cmd("git diff --check")
-    if diff_check.returncode != 0:
-        print("[CHANGES REQUIRED] git diff --check failed with conflict markers or whitespace errors.")
-        return 1
+    auditor = ScopeAuditor()
+    verdict = auditor.run(repo_path)
 
-    status_str = "APPROVED"
-    print(f"[{status_str}] All automated pre-commit checks passed cleanly.")
+    for res in verdict.results:
+        if res.severity == AuditSeverity.APPROVED:
+            icon = "✅ [PASS]"
+        elif res.severity == AuditSeverity.CHANGES_REQUIRED:
+            icon = "⚠️  [WARN]"
+        else:
+            icon = "❌ [FAIL]"
+        print(f" {icon} {res.rule_name}: {res.message}")
+
+    print("-" * 58)
+    print(f" FINAL VERDICT: [{verdict.status}] (exit code {verdict.exit_code})")
+    print("=" * 58 + "\n")
 
     webhook = WebhookDispatcher()
     webhook.send_event(
         event_type="audit",
         task_id=active_task.get("id", "XX.Y"),
         title=active_task.get("title", "Ad-hoc task"),
-        status=status_str,
-        details={"summary": "Pre-commit audit passed code checks"}
+        status=verdict.status,
+        details={
+            "exit_code": verdict.exit_code,
+            "rule_count": len(verdict.results),
+            "rules": [
+                {
+                    "rule": r.rule_name,
+                    "status": r.severity.label,
+                    "message": r.message,
+                }
+                for r in verdict.results
+            ],
+        },
     )
-    return 0
+    return verdict.exit_code
 
 def cmd_done(custom_msg: Optional[str] = None, promote: bool = False, weight: str = "medium", notify_planner: bool = True):
     task_file = get_task_file()
