@@ -31,6 +31,11 @@ Commands:
                            Launch interactive terminal dashboard prototype displaying
                            active task contract status, DoD checklist, and scope audit.
                            (Alias: taskctl tui)
+  taskctl daemon [--watch <path>...] [--interval <sec>] [--once] [--json]
+                           Run cross-repo telemetry aggregation daemon to monitor multiple
+                           workspaces and broadcast live events to Vector, Canvas, and Webhooks.
+  taskctl broadcast [msg] [--watch <path>...] [--json]
+                           Aggregate cross-repo status roll-up and broadcast to configured sinks.
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
 """
 
@@ -69,7 +74,13 @@ from taskctl.providers.maestri import (
     handoff_task_done,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
-from taskctl.telemetry import get_telemetry_emitter, TelemetryEvent
+from taskctl.telemetry import (
+    get_telemetry_emitter,
+    TelemetryEvent,
+    CrossRepoAggregator,
+    TelemetryBroadcaster,
+    TelemetryDaemon,
+)
 from taskctl.tui import Dashboard
 
 def run_cmd(cmd_str: str, check: bool = False, capture: bool = True) -> subprocess.CompletedProcess:
@@ -849,6 +860,58 @@ def cmd_notify(msg: str):
     )
     print(f"[OK] Notification dispatched (Canvas: {'sent' if canvas_ok else 'skipped'}, Webhook: {'sent' if hook_ok else 'skipped/not configured'}).")
 
+def cmd_daemon(
+    watch_paths: Optional[List[str]] = None,
+    interval: float = 5.0,
+    once: bool = False,
+    json_output: bool = False,
+    broadcast_canvas: bool = True,
+    broadcast_vector: bool = True,
+    broadcast_webhook: bool = True,
+) -> int:
+    daemon = TelemetryDaemon(
+        watch_paths=watch_paths,
+        interval=interval,
+        broadcast_vector=broadcast_vector,
+        broadcast_canvas=broadcast_canvas,
+        broadcast_webhook=broadcast_webhook,
+        output_format="json" if json_output else "text",
+    )
+    if once:
+        daemon.run_once()
+        return 0
+    daemon.run()
+    return 0
+
+def cmd_broadcast(
+    msg: Optional[str] = None,
+    watch_paths: Optional[List[str]] = None,
+    json_output: bool = False,
+    broadcast_canvas: bool = True,
+    broadcast_vector: bool = True,
+    broadcast_webhook: bool = True,
+) -> int:
+    aggregator = CrossRepoAggregator(watch_paths=watch_paths)
+    broadcaster = TelemetryBroadcaster(
+        broadcast_vector=broadcast_vector,
+        broadcast_canvas=broadcast_canvas,
+        broadcast_webhook=broadcast_webhook,
+    )
+    summary = aggregator.get_summary()
+    results = broadcaster.broadcast_summary(summary, custom_msg=msg)
+
+    if json_output:
+        import json
+        print(json.dumps({"summary": summary, "dispatch_results": results}, indent=2))
+    else:
+        daemon_helper = TelemetryDaemon(watch_paths=watch_paths)
+        print(daemon_helper.format_summary_table(summary))
+        canvas_status = "sent" if results.get("canvas") else "skipped"
+        vector_status = "sent" if results.get("vector") else "skipped/unconfigured"
+        webhook_status = "sent" if results.get("webhook") else "skipped/unconfigured"
+        print(f"[OK] Broadcaster dispatched summary (Canvas: {canvas_status}, Vector: {vector_status}, Webhook: {webhook_status}).")
+    return 0
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
         print(__doc__)
@@ -1014,6 +1077,96 @@ def main():
             else:
                 i += 1
         sys.exit(cmd_dashboard(snapshot=snapshot, interval=interval, run_tests=run_tests, split=split))
+    elif cmd == "daemon":
+        watch_paths: List[str] = []
+        interval = 5.0
+        once = False
+        json_output = False
+        broadcast_canvas = True
+        broadcast_vector = True
+        broadcast_webhook = True
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-w", "--watch"] and i + 1 < len(args):
+                watch_paths.append(args[i + 1])
+                i += 2
+            elif args[i] in ["-i", "--interval"] and i + 1 < len(args):
+                try:
+                    interval = float(args[i + 1])
+                except ValueError:
+                    interval = 5.0
+                i += 2
+            elif args[i] in ["-s", "--snapshot", "--once"]:
+                once = True
+                i += 1
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["--no-canvas"]:
+                broadcast_canvas = False
+                i += 1
+            elif args[i] in ["--no-vector"]:
+                broadcast_vector = False
+                i += 1
+            elif args[i] in ["--no-webhook"]:
+                broadcast_webhook = False
+                i += 1
+            elif not args[i].startswith("-"):
+                watch_paths.append(args[i])
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_daemon(
+            watch_paths=watch_paths or None,
+            interval=interval,
+            once=once,
+            json_output=json_output,
+            broadcast_canvas=broadcast_canvas,
+            broadcast_vector=broadcast_vector,
+            broadcast_webhook=broadcast_webhook,
+        ))
+    elif cmd == "broadcast":
+        watch_paths: List[str] = []
+        custom_msg = None
+        json_output = False
+        broadcast_canvas = True
+        broadcast_vector = True
+        broadcast_webhook = True
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-w", "--watch"] and i + 1 < len(args):
+                watch_paths.append(args[i + 1])
+                i += 2
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["--no-canvas"]:
+                broadcast_canvas = False
+                i += 1
+            elif args[i] in ["--no-vector"]:
+                broadcast_vector = False
+                i += 1
+            elif args[i] in ["--no-webhook"]:
+                broadcast_webhook = False
+                i += 1
+            elif not args[i].startswith("-") and custom_msg is None:
+                custom_msg = args[i]
+                i += 1
+            elif not args[i].startswith("-"):
+                watch_paths.append(args[i])
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_broadcast(
+            msg=custom_msg,
+            watch_paths=watch_paths or None,
+            json_output=json_output,
+            broadcast_canvas=broadcast_canvas,
+            broadcast_vector=broadcast_vector,
+            broadcast_webhook=broadcast_webhook,
+        ))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)

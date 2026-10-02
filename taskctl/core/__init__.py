@@ -1,6 +1,11 @@
 """taskctl core engines (parser, models, state machine, auditor)."""
 
-from taskctl.core.parser import parse_task_md
+from taskctl.core.parser import (
+    parse_task_md,
+    parse_completed_tasks,
+    find_repo_root,
+    get_task_file,
+)
 from taskctl.core.commits import (
     ConventionalCommit,
     CommitValidationResult,
@@ -23,6 +28,9 @@ from taskctl.core.auditor import (
 
 __all__ = [
     "parse_task_md",
+    "parse_completed_tasks",
+    "find_repo_root",
+    "get_task_file",
     "ConventionalCommit",
     "CommitValidationResult",
     "parse_conventional_commit",

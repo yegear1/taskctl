@@ -21,6 +21,7 @@
 | [ADR-002](adr/002-vector-telemetry-sink.md) | VictoriaLogs & Vector Direct Sink Integration with Provider Telemetry | Approved | 2026-10-01 |
 | [ADR-003](adr/003-conventional-commits-policy.md) | Conventional Commits Policy Engine & Scope Auditor Integration | Approved | 2026-10-01 |
 | [ADR-004](adr/004-remote-agent-canvas-contract-integration.md) | Remote Agent Canvas Contract Engine Integration & Maestri IPC | Approved | 2026-10-01 |
+| [ADR-005](adr/005-cross-repo-telemetry-aggregation-daemon.md) | Cross-Repository Telemetry Aggregation Daemon & Status Broadcaster | Approved | 2026-10-02 |
 
 ---
 
@@ -51,6 +52,11 @@
 - **Decision:** Implement `MaestriIPCClient` using UNIX domain sockets with CLI fallback, supporting bidirectional note syncing (`taskctl sync [--push|--pull]`), remote canvas workspace provisioning (`taskctl ws`), agent planning delegation (`taskctl plan`), and fail-safe canvas notifications (`taskctl notify`).
 - **Consequences:** Real-time visibility and control across agent canvas with zero risk of developer blocking if Maestri is offline.
 
+### 2026-10-02 Cross-Repository Telemetry Aggregation Daemon & Status Broadcaster
+- **Context:** Providing continuous cross-workspace visibility and real-time status broadcasting across local satellite repositories without crashing or blocking.
+- **Decision:** Implement `CrossRepoAggregator`, `TelemetryBroadcaster`, and `TelemetryDaemon` in `taskctl.telemetry`, along with CLI commands `taskctl daemon` and `taskctl broadcast`.
+- **Consequences:** Hermetic, fail-safe polling and broadcasting of task lifecycle events and summaries to Vector, Canvas, and Webhooks.
+
 ---
 
 ## Active Contracts
@@ -60,6 +66,7 @@
 | `.agent/TASK.md` | `taskctl` / Agent | `taskctl.core.parser` | Markdown AST task schema |
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
+| `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs NDJSON/JSON |
 | `MaestriIPCClient` / CLI | `taskctl` | Maestri Spatial Canvas | JSON-RPC / CLI notes & workspace commands |

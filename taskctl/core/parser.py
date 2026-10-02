@@ -4,16 +4,21 @@ import re
 import os
 from typing import Dict, List, Any, Tuple, Optional
 
-def find_repo_root() -> str:
-    curr = os.getcwd()
+def find_repo_root(start_dir: Optional[str] = None) -> str:
+    curr = os.path.abspath(start_dir) if start_dir else os.getcwd()
     while curr != "/":
         if os.path.exists(os.path.join(curr, ".agent", "TASK.md")) or os.path.exists(os.path.join(curr, ".git")):
             return curr
-        curr = os.path.dirname(curr)
-    return os.getcwd()
+        parent = os.path.dirname(curr)
+        if parent == curr:
+            break
+        curr = parent
+    return os.path.abspath(start_dir) if start_dir else os.getcwd()
 
-def get_task_file() -> str:
-    root = find_repo_root()
+def get_task_file(root_or_path: Optional[str] = None) -> str:
+    if root_or_path and os.path.isfile(root_or_path) and os.path.basename(root_or_path) == "TASK.md":
+        return root_or_path
+    root = find_repo_root(root_or_path) if root_or_path else find_repo_root()
     path = os.path.join(root, ".agent", "TASK.md")
     if not os.path.exists(path):
         raise FileNotFoundError(f".agent/TASK.md not found in repository root: {root}")
@@ -61,3 +66,28 @@ def parse_task_md(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
                 })
 
     return active_task, backlog
+
+def parse_completed_tasks(content: str) -> List[Dict[str, Any]]:
+    """Parse completed tasks from the '## Completed Tasks Log' section table."""
+    completed: List[Dict[str, Any]] = []
+    log_sec = re.search(r"## Completed Tasks Log[^\n]*\n(.*?)(?=\n---|\n## Backlog|\n## Release|$)", content, re.DOTALL)
+    if not log_sec:
+        return completed
+
+    for line in log_sec.group(1).strip().split("\n"):
+        line = line.strip()
+        if not line.startswith("|") or "Task" in line or "---" in line:
+            continue
+        parts = [p.strip() for p in line.split("|")[1:-1]]
+        if len(parts) >= 2:
+            task_id = re.sub(r"[\[\]]", "", parts[0]).strip()
+            title = parts[1].strip()
+            commits = parts[2].strip() if len(parts) > 2 else ""
+            date = parts[3].strip() if len(parts) > 3 else ""
+            completed.append({
+                "id": task_id,
+                "title": title,
+                "commits": commits,
+                "date": date,
+            })
+    return completed

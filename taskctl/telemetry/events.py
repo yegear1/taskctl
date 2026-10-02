@@ -23,6 +23,7 @@ class TelemetryEvent:
     duration_ms: Optional[float] = None
     event_type: Optional[str] = None
     task_id: Optional[str] = None
+    workspace: Optional[str] = None
     trace_id: Optional[str] = None
     request_id: Optional[str] = None
     http_status: Optional[int] = None
@@ -50,6 +51,8 @@ class TelemetryEvent:
             payload["event_type"] = self.event_type
         if self.task_id is not None:
             payload["task_id"] = self.task_id
+        if self.workspace is not None:
+            payload["workspace"] = self.workspace
         if self.trace_id is not None:
             payload["trace_id"] = self.trace_id
         if self.request_id is not None:

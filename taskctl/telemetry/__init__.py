@@ -6,6 +6,13 @@ from taskctl.telemetry.sink import (
     TelemetryEmitter,
     get_telemetry_emitter,
 )
+from taskctl.telemetry.aggregator import (
+    WorkspaceState,
+    WorkspaceEvent,
+    CrossRepoAggregator,
+)
+from taskctl.telemetry.broadcaster import TelemetryBroadcaster
+from taskctl.telemetry.daemon import TelemetryDaemon
 
 __all__ = [
     "TelemetryEvent",
@@ -13,4 +20,9 @@ __all__ = [
     "VectorSink",
     "TelemetryEmitter",
     "get_telemetry_emitter",
+    "WorkspaceState",
+    "WorkspaceEvent",
+    "CrossRepoAggregator",
+    "TelemetryBroadcaster",
+    "TelemetryDaemon",
 ]

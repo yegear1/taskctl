@@ -1,3 +1,4 @@
+import os
 import unittest
 from taskctl.core.parser import parse_task_md
 
@@ -91,6 +92,23 @@ class TestParser(unittest.TestCase):
         self.assertEqual(len(backlog), 2)
         self.assertEqual(backlog[0]["id"], "00.1")
         self.assertEqual(backlog[1]["id"], "01.1")
+
+    def test_parse_completed_tasks(self):
+        from taskctl.core.parser import parse_completed_tasks
+        completed = parse_completed_tasks(SAMPLE_TASK_MD)
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0]["id"], "01.1")
+        self.assertEqual(completed[0]["title"], "Prior work")
+        self.assertIn("1234abc", completed[0]["commits"])
+        self.assertEqual(completed[0]["date"], "2026-10-01")
+
+    def test_find_repo_root_and_get_task_file(self):
+        from taskctl.core.parser import find_repo_root, get_task_file
+        root = find_repo_root()
+        self.assertTrue(os.path.isdir(root))
+        task_file = get_task_file()
+        self.assertTrue(os.path.isfile(task_file))
+        self.assertTrue(task_file.endswith("TASK.md"))
 
 if __name__ == "__main__":
     unittest.main()
