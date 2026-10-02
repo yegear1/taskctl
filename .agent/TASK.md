@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [XX.Y]: [Short descriptive title]
+### 📌 Task [03.3]: Hybrid Scope Auditor with canvas agent delegation fallback
 
-- **Description:** Extend `taskctl.providers.maestri` and `taskctl ws` to support multi-agent topology presets (`trinity`, `swarm`, `audit`) and configurable workspace layout generators for the Maestri spatial canvas environment.
-- **Systems Involved:** [taskctl/providers/maestri.py, taskctl/cli.py, tests/test_maestri_provider.py]
+- **Description:** Extend `taskctl.core.auditor` and `taskctl audit` to support hybrid scope auditing with optional canvas agent delegation fallback (`Auditor` or `ScopeAuditor`) for semantic and structural diff verification.
+- **Systems Involved:** [taskctl/core/auditor.py, taskctl/cli.py, tests/test_auditor.py]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -19,10 +19,10 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [x] `taskctl ws` CLI supports `--preset <name>` (e.g. trinity, swarm, audit) and `--workers <n>`.
-- [x] Maestri provider resolves custom workspace canvas generators and layout definitions with graceful fallback.
-- [x] Automated tests cover CLI flag parsing and provider delegation with hermetic mocks.
-- [x] Strict typing verified with `python3 -m py_compile`.
+- [ ] Scope Auditor evaluates local rules first and can delegate complex semantic diff reviews to connected canvas agents.
+- [ ] Graceful fallback to local heuristic audit when Maestri canvas agent is offline or unresponsive.
+- [ ] Telemetry logs hybrid audit decisions and latencies.
+- [ ] Automated hermetic tests cover hybrid execution paths.
 
 ---
 
@@ -42,7 +42,6 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[03.3]** Hybrid Scope Auditor with canvas agent delegation fallback
 - [ ] **[03.4]** Autonomous agent lifecycle hand-offs on task start (`cmd_next`) and task completion (`cmd_done`)
 
 ---
