@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [03.4]: Autonomous agent lifecycle hand-offs on task start (`cmd_next`) and task completion (`cmd_done`)
+### 📌 Task [03.5]: Interactive terminal dashboard prototype for active task and DoD checklist
 
-- **Description:** Implement automated agent lifecycle coordination hooks and hand-offs during task start (`taskctl next`) and completion (`taskctl done`), notifying and dispatching context across connected canvas agents.
-- **Systems Involved:** [taskctl/cli.py, taskctl/providers/maestri.py, tests/test_maestri.py]
+- **Description:** Build an interactive terminal dashboard prototype displaying active task contract status, DoD checklist, and scope audit verdicts.
+- **Systems Involved:** [taskctl/cli.py, taskctl/tui/ or taskctl/core/, tests/]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -19,10 +19,10 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Automated hand-off hooks triggered when promoting tasks via `cmd_next` and completing tasks via `cmd_done`.
-- [ ] Context hand-off dispatches task contract updates and instructions to relevant canvas agent roles.
-- [ ] Non-blocking fail-safe execution when canvas or agents are offline.
-- [ ] Automated tests cover lifecycle hand-off transitions.
+- [ ] Terminal UI dashboard renders active task metadata and criteria.
+- [ ] Shows real-time DoD checklist status and git workspace cleanliness.
+- [ ] Non-blocking execution with clean graceful terminal exit.
+- [ ] Unit tests cover dashboard state formatting and rendering components.
 
 ---
 
@@ -30,6 +30,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.4] | Autonomous agent lifecycle hand-offs on task start (cmd_next) and task completion (cmd_done) | [`e33c6f8`] | 2026-10-02 |
 | [03.3] | Hybrid Scope Auditor with canvas agent delegation fallback | [`e239433`] | 2026-10-02 |
 | [03.2] | Canvas topology presets & workspace generator integration in Maestri provider | [`86b86fe`] | 2026-10-02 |
 | [03.1] | Contract engine integration with remote agent canvas | [`9a51fe2`] | 2026-10-02 |
@@ -43,7 +44,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[03.5]** Interactive terminal dashboard prototype for active task and DoD checklist
+*(Backlog empty — awaiting new roadmap planning)*
 
 ---
 
