@@ -26,6 +26,10 @@ Commands:
   taskctl lint-commit [msg] [--file <path>]  Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
+  taskctl dashboard [--snapshot] [--interval <sec>] [--tests]
+                           Launch interactive terminal dashboard prototype displaying
+                           active task contract status, DoD checklist, and scope audit.
+                           (Alias: taskctl tui)
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
 """
 
@@ -65,6 +69,7 @@ from taskctl.providers.maestri import (
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
 from taskctl.telemetry import get_telemetry_emitter, TelemetryEvent
+from taskctl.tui import Dashboard
 
 def run_cmd(cmd_str: str, check: bool = False, capture: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -188,6 +193,14 @@ def cmd_status():
     v_sink = get_telemetry_emitter().vector_sink
     print(f"Vector Sink  : {'Configured (' + v_sink.endpoint_url + ')' if v_sink.is_configured() else 'Not configured (set TASKCTL_VECTOR_URL or VECTOR_URL)'}")
     print("="*50 + "\n")
+
+def cmd_dashboard(snapshot: bool = False, interval: float = 2.0, run_tests: bool = False) -> int:
+    dashboard = Dashboard(interval=interval, run_tests=run_tests)
+    if snapshot:
+        sys.stdout.write(dashboard.render_snapshot() + "\n")
+        sys.stdout.flush()
+        return 0
+    return dashboard.run()
 
 def cmd_quota():
     quotas = get_profile_quotas()
@@ -900,6 +913,28 @@ def main():
                 i += 1
         msg = " ".join(msg_parts) if msg_parts else None
         sys.exit(cmd_lint_commit(msg=msg, file_path=file_path))
+    elif cmd in ["dashboard", "tui"]:
+        snapshot = False
+        interval = 2.0
+        run_tests = False
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--snapshot", "--once", "-s"]:
+                snapshot = True
+                i += 1
+            elif args[i] in ["--interval", "-i"] and i + 1 < len(args):
+                try:
+                    interval = float(args[i + 1])
+                except ValueError:
+                    interval = 2.0
+                i += 2
+            elif args[i] in ["--tests", "-t", "--heavy"]:
+                run_tests = True
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_dashboard(snapshot=snapshot, interval=interval, run_tests=run_tests))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)
