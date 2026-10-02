@@ -7,19 +7,22 @@
 
 ## Active Task
 
-### 📌 Task [XX.Y]: [Short descriptive title]
+### 📌 Task [03.2]: Canvas topology presets & workspace generator integration in Maestri provider
 
-- **Description:** [Awaiting next planned task]
-- **Systems Involved:** []
+- **Description:** Extend `taskctl.providers.maestri` and `taskctl ws` to support multi-agent topology presets (`trinity`, `swarm`, `audit`) and configurable workspace layout generators for the Maestri spatial canvas environment.
+- **Systems Involved:** [taskctl/providers/maestri.py, taskctl/cli.py, tests/test_maestri_provider.py]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
-  - [ ] Source code changes
+  - [x] Source code changes
 - **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Criteria pending next task promotion
+- [ ] `taskctl ws` CLI supports `--preset <name>` (e.g. trinity, swarm, audit) and `--workers <n>`.
+- [ ] Maestri provider resolves custom workspace canvas generators and layout definitions with graceful fallback.
+- [ ] Automated tests cover CLI flag parsing and provider delegation with hermetic mocks.
+- [ ] Strict typing verified with `python3 -m py_compile`.
 
 ---
 
@@ -38,7 +41,8 @@
 
 ## Backlog (Upcoming, in priority order)
 
-*(No upcoming tasks in backlog)*
+- [ ] **[03.3]** Hybrid Scope Auditor with canvas agent delegation fallback
+- [ ] **[03.4]** Autonomous agent lifecycle hand-offs on task start (`cmd_next`) and task completion (`cmd_done`)
 
 ---
 

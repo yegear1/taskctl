@@ -16,7 +16,7 @@
 | **`taskctl`** *(Current)* | Task Lifecycle, Contract Engine & Multi-Agent CLI | `Self` | `https://github.com/yegear1/taskctl` | Platform Team |
 | `template-agent` | Upstream Governance Baseline (Greenfield & Brownfield) | `Upstream (Dependency)` | `https://github.com/ye-sandbox/template-agent` | Governance Team |
 | `agent-skills` | Central Skill Library & Cross-Repository Capabilities | `Upstream (Dependency)` | `https://github.com/ye-sandbox/agent-skills` | Core Agents |
-| `maestri` | Spatial Canvas UI & Multi-Agent Terminal Orchestrator | `Downstream (Consumer)` | `Desktop App (Local IPC Socket)` | Orchestration |
+| `maestri` | Spatial Canvas UI & Multi-Agent Terminal Orchestrator | `External (Supported Platform)` | Desktop App (Local IPC Socket) | Platform Integration |
 | `multigravity-cli` | Multi-profile Quota Balancer, Isolation & Worktree CLI | `Downstream (Consumer)` | `https://github.com/yegear1/multigravity-cli` | Infrastructure |
 | `victorialogs` | Structured Log & Audit Telemetry Sink | `Downstream (Consumer)` | `https://github.com/ye-sandbox/victorialogs` | Observability |
 
