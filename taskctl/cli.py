@@ -10,7 +10,9 @@ Commands:
   taskctl status           Show active task, criteria, git status, and quota route.
   taskctl quota            Display real-time Multigravity quota across all profiles.
   taskctl plan "<prompt>"  Ask the Planner agent to decompose tasks into .agent/TASK.md.
-  taskctl next [--weight]  Promote next backlog task to active (RUNNING) and notify Dev.
+  taskctl next [--weight] [--agent <name>] [--no-handoff]
+                           Promote next backlog task to active (RUNNING) and dispatch
+                           lifecycle hand-off context to Builder agent.
   taskctl audit [--delegate] [--agent <name>]
                            Trigger Scope Auditor to verify diff with optional canvas
                            agent delegation fallback.
@@ -18,8 +20,9 @@ Commands:
                              0: [APPROVED] - Ready for taskctl done.
                              1: [CHANGES REQUIRED] - Prints Required Action for auto-remediation.
                              2: [REJECTED] - Critical failure; escalates to Planner/human.
-  taskctl done [msg] [-p]  Validate DoD, create double atomic commit (code + governance),
-                           and dispatch webhook notifications.
+  taskctl done [msg] [-p] [--agent <name>] [--no-handoff]
+                           Validate DoD, create double atomic commit (code + governance),
+                           dispatch completion hand-off to Auditor/Planner, and trigger webhooks.
   taskctl lint-commit [msg] [--file <path>]  Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
@@ -55,6 +58,10 @@ from taskctl.providers.maestri import (
     list_topology_presets,
     get_topology_preset,
     apply_topology_to_canvas,
+    AgentHandoffResult,
+    dispatch_agent_handoff,
+    handoff_task_start,
+    handoff_task_done,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
 from taskctl.telemetry import get_telemetry_emitter, TelemetryEvent
@@ -206,7 +213,7 @@ def cmd_quota():
     print(f"Optimal Allocation: Profile '{best_p}' -> {best_m}")
     print(f"Reason: {reason}\n")
 
-def cmd_next(weight: str = "medium"):
+def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff: bool = True):
     task_file = get_task_file()
     with open(task_file, "r", encoding="utf-8") as f:
         content = f.read()
@@ -274,6 +281,27 @@ def cmd_next(weight: str = "medium"):
             "model": best_model,
         },
     )
+
+    if handoff:
+        promoted_active, _ = parse_task_md(updated)
+        task_data = {
+            "task_id": next_id,
+            "title": next_title,
+            "status": "RUNNING",
+            "target_profile": best_profile,
+            "target_model": best_model,
+            "description": promoted_active.get("description", "") if promoted_active else "",
+            "systems": promoted_active.get("systems", "") if promoted_active else "",
+            "criteria": promoted_active.get("criteria", []) if promoted_active else [],
+            "runtime_target": f"Profile '{best_profile}' | Model: '{best_model}'",
+        }
+        h_res = handoff_task_start(task_data, target_agent=target_agent)
+        if h_res.delivered:
+            print(f"[Hand-off] Successfully dispatched context to canvas agent '{h_res.target_agent}'.")
+            if h_res.response:
+                print(f"            Response: {h_res.response}")
+        else:
+            print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
 
 def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
     from pathlib import Path
@@ -421,7 +449,14 @@ def cmd_lint_commit(msg: Optional[str] = None, file_path: Optional[str] = None) 
         )
         return 1
 
-def cmd_done(custom_msg: Optional[str] = None, promote: bool = False, weight: str = "medium", notify_planner: bool = True):
+def cmd_done(
+    custom_msg: Optional[str] = None,
+    promote: bool = False,
+    weight: str = "medium",
+    notify_planner: bool = True,
+    target_agent: Optional[str] = None,
+    handoff: bool = True,
+):
     task_file = get_task_file()
     with open(task_file, "r", encoding="utf-8") as f:
         content = f.read()
@@ -503,8 +538,25 @@ def cmd_done(custom_msg: Optional[str] = None, promote: bool = False, weight: st
         details={"commit": commit_hash, "governance_commit": gov_hash},
     )
 
+    if handoff:
+        task_data = {
+            "task_id": task_id,
+            "title": title,
+            "status": "DONE",
+            "commit_hash": commit_hash,
+            "governance_commit": gov_hash,
+            "notify_planner": notify_planner,
+        }
+        h_res = handoff_task_done(task_data, target_agent=target_agent)
+        if h_res.delivered:
+            print(f"[Hand-off] Completion context dispatched to canvas agent '{h_res.target_agent}'.")
+            if h_res.response:
+                print(f"            Response: {h_res.response}")
+        else:
+            print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
+
     if promote:
-        cmd_next(weight=weight)
+        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff)
 
 def cmd_backlog():
     task_file = get_task_file()
@@ -768,10 +820,23 @@ def main():
         cmd_plan(prompt=plan_prompt)
     elif cmd == "next":
         weight = "medium"
-        for arg in sys.argv[2:]:
-            if arg in ["light", "medium", "heavy"]:
-                weight = arg
-        cmd_next(weight=weight)
+        target_agent = None
+        handoff = True
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["light", "medium", "heavy"]:
+                weight = args[i]
+                i += 1
+            elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
+                target_agent = args[i + 1]
+                i += 2
+            elif args[i] in ["--no-handoff", "--skip-handoff"]:
+                handoff = False
+                i += 1
+            else:
+                i += 1
+        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff)
     elif cmd == "audit":
         delegate = False
         agent_name = None
@@ -791,12 +856,30 @@ def main():
     elif cmd == "done":
         promote = False
         custom_msg = None
-        for arg in sys.argv[2:]:
-            if arg in ["-p", "--promote"]:
+        target_agent = None
+        handoff = True
+        weight = "medium"
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-p", "--promote"]:
                 promote = True
-            elif not arg.startswith("-"):
-                custom_msg = arg
-        cmd_done(custom_msg=custom_msg, promote=promote)
+                i += 1
+            elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
+                target_agent = args[i + 1]
+                i += 2
+            elif args[i] in ["--no-handoff", "--skip-handoff"]:
+                handoff = False
+                i += 1
+            elif args[i] in ["--weight", "-w"] and i + 1 < len(args):
+                weight = args[i + 1]
+                i += 2
+            elif not args[i].startswith("-") and custom_msg is None:
+                custom_msg = args[i]
+                i += 1
+            else:
+                i += 1
+        cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff)
     elif cmd == "sync":
         pull = "--pull" in sys.argv[2:]
         cmd_sync(pull=pull)

@@ -649,3 +649,177 @@ def ask_agent(agent_name: str, prompt: str, timeout: int = 60) -> Optional[str]:
         return res.stdout.strip()
 
     return None
+
+
+@dataclass
+class AgentHandoffResult:
+    """Result of an autonomous agent lifecycle hand-off dispatch."""
+    phase: str
+    task_id: str
+    target_agent: Optional[str]
+    delivered: bool
+    response: Optional[str] = None
+    error: Optional[str] = None
+
+
+def dispatch_agent_handoff(
+    phase: str,
+    task_data: Dict[str, Any],
+    target_agent: Optional[str] = None,
+    timeout: float = 2.0,
+) -> AgentHandoffResult:
+    """Dispatch structured lifecycle hand-off context and instructions across canvas agents.
+
+    Phases supported:
+      - 'start': Hand-off to builder/implementer agents when task is promoted to RUNNING.
+      - 'completion' (or 'done'): Hand-off to auditor/planner agents when task is marked DONE.
+
+    Guarantees non-blocking fail-safe execution if agents or canvas are offline.
+    """
+    start_time = time.perf_counter()
+    task_id = str(task_data.get("task_id", "XX.Y"))
+    title = str(task_data.get("title", "Ad-hoc task"))
+    normalized_phase = "completion" if phase in ["done", "completion"] else "start"
+
+    # 1. Determine candidate agents
+    if target_agent:
+        candidates = [target_agent]
+    elif normalized_phase == "start":
+        candidates = ["Builder", "Implementer", "Worker-1", "SwarmLead"]
+    else:
+        candidates = ["Auditor", "ScopeAuditor", "TestVerifier", "Planner"]
+
+    # 2. Build structured prompt & ambient canvas notification
+    if normalized_phase == "start":
+        criteria_list = task_data.get("criteria", [])
+        if isinstance(criteria_list, list):
+            criteria_str = "\n".join(
+                f"- [{'x' if c.get('checked') else ' '}] {c.get('text', '')}"
+                if isinstance(c, dict) else f"- {c}"
+                for c in criteria_list
+            )
+        else:
+            criteria_str = str(criteria_list)
+
+        prompt = (
+            f"[TASK LIFECYCLE HAND-OFF: START]\n"
+            f"Task [{task_id}]: {title}\n"
+            f"Status: RUNNING\n"
+            f"Runtime Target: {task_data.get('runtime_target', 'Profile default')}\n"
+            f"Systems Involved: {task_data.get('systems', 'N/A')}\n"
+            f"Description: {task_data.get('description', 'N/A')}\n"
+            f"Acceptance Criteria:\n{criteria_str if criteria_str else 'N/A'}\n\n"
+            f"Instructions:\n"
+            f"You are the assigned agent. Implement the task adhering strictly to task criteria, "
+            f"maintain Definition of Done (DoD), and avoid scope creep."
+        )
+        notif_msg = f"🚀 [TASK START] [{task_id}] '{title}' promoted to RUNNING -> Assigned to {candidates[0]}"
+    else:
+        commit_hash = task_data.get("commit_hash", "HEAD")
+        gov_hash = task_data.get("governance_commit", "HEAD")
+        prompt = (
+            f"[TASK LIFECYCLE HAND-OFF: COMPLETION]\n"
+            f"Task [{task_id}]: {title}\n"
+            f"Status: DONE\n"
+            f"Feature Commit: {commit_hash}\n"
+            f"Governance Commit: {gov_hash}\n\n"
+            f"Instructions:\n"
+            f"Task execution has concluded and changes have been committed. "
+            f"Perform post-completion validation, audit checks, or update roadmap planning."
+        )
+        notif_msg = f"🏁 [TASK DONE] [{task_id}] '{title}' completed -> Hand-off to {candidates[0]} (commit: {commit_hash})"
+
+    # Ambient canvas broadcast (fail-safe)
+    send_canvas_notification(notif_msg)
+
+    # 3. Dispatch to candidate agents
+    agent_used: Optional[str] = None
+    agent_resp: Optional[str] = None
+    delivered = False
+    error: Optional[str] = None
+
+    for cand in candidates:
+        try:
+            resp = ask_agent(cand, prompt, timeout=int(timeout))
+            if resp is not None:
+                agent_used = cand
+                agent_resp = resp
+                delivered = True
+                break
+        except Exception as e:
+            error = str(e)
+            continue
+
+    if not delivered and error is None:
+        error = f"No responsive canvas agent found among candidates: {', '.join(candidates)}"
+
+    duration_ms = (time.perf_counter() - start_time) * 1000.0
+
+    # 4. Telemetry
+    try:
+        emitter = get_telemetry_emitter()
+        emitter.record_provider_call(
+            provider="maestri",
+            operation=f"handoff:{normalized_phase}",
+            duration_ms=duration_ms,
+            success=delivered,
+            metadata={
+                "task_id": task_id,
+                "target_agent": agent_used,
+                "delivered": delivered,
+                "candidates": candidates,
+            },
+        )
+        emitter.emit_lifecycle_event(
+            event_type="agent_handoff",
+            task_id=task_id,
+            message=f"Lifecycle hand-off ({normalized_phase}) for [{task_id}]: agent='{agent_used or 'none'}', delivered={delivered}",
+            status="DELIVERED" if delivered else "DEGRADED",
+            duration_ms=duration_ms,
+            level="info" if delivered else "warn",
+            details={
+                "phase": normalized_phase,
+                "target_agent": agent_used,
+                "delivered": delivered,
+                "error": error if not delivered else None,
+            },
+        )
+    except Exception:
+        pass
+
+    return AgentHandoffResult(
+        phase=normalized_phase,
+        task_id=task_id,
+        target_agent=agent_used,
+        delivered=delivered,
+        response=agent_resp,
+        error=error if not delivered else None,
+    )
+
+
+def handoff_task_start(
+    task_data: Dict[str, Any],
+    target_agent: Optional[str] = None,
+    timeout: float = 2.0,
+) -> AgentHandoffResult:
+    """Convenience helper for task start hand-offs."""
+    return dispatch_agent_handoff(
+        phase="start",
+        task_data=task_data,
+        target_agent=target_agent,
+        timeout=timeout,
+    )
+
+
+def handoff_task_done(
+    task_data: Dict[str, Any],
+    target_agent: Optional[str] = None,
+    timeout: float = 2.0,
+) -> AgentHandoffResult:
+    """Convenience helper for task completion hand-offs."""
+    return dispatch_agent_handoff(
+        phase="completion",
+        task_data=task_data,
+        target_agent=target_agent,
+        timeout=timeout,
+    )
