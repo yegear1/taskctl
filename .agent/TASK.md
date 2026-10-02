@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [02.2]: Automated commit message Conventional Commits linter & policy
+### 📌 Task [03.1]: Contract engine integration with remote agent canvas
 
-- **Description:** Implement automated validation of Conventional Commits format for commits, integrating with taskctl audit and scope policies.
-- **Systems Involved:** [taskctl, git, core]
+- **Description:** Implement contract engine integration with remote agent canvas (Maestri IPC & canvas note sync).
+- **Systems Involved:** [providers, maestri, core]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -27,6 +27,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [02.2] | Automated commit message Conventional Commits linter & policy | [`e3168c7`] | 2026-10-01 |
 | [00.0] | Initial scaffolding (ADD greenfield template) | [`1d74dac`] | 2026-10-01 |
 | [01.1] | Taskctl core engine, CLI, providers, and test suite | [`8875338`, `d3de1aa`] | 2026-10-01 |
 | [01.2] | Scope auditor rule-based policy expansion | [`b07e582`] | 2026-10-01 |
@@ -36,7 +37,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[03.1]** [Contract engine integration with remote agent canvas] — `[providers]`
+*(No upcoming tasks in backlog)*
 
 ---
 
