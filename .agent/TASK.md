@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [03.6]: GitHub Actions pre-commit and Scope Auditor CI workflow
+### 📌 Task [03.7]: Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer)
 
-- **Description:** Implement GitHub Actions workflow to run hermetic unit tests, syntax checks, Conventional Commits linting, and Scope Auditor on pull requests and pushes.
-- **Systems Involved:** [.github/workflows/ci.yml, taskctl/cli.py]
+- **Description:** Enhance taskctl dashboard / tui with mouse scroll event handling and split-pane diff viewing for changed files.
+- **Systems Involved:** [taskctl/tui/dashboard.py, taskctl/tui/renderer.py]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -19,9 +19,9 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] GitHub Actions workflow config triggers on push and pull_request to main.
-- [ ] Workflow executes py_compile, unittest discovery, git diff --check, and taskctl audit.
-- [ ] Zero failure tolerance on lint and commit conventions.
+- [ ] Terminal dashboard supports mouse wheel / scroll events.
+- [ ] Split-pane view renders git diff of modified files alongside contract status.
+- [ ] Tests and Scope Auditor pass cleanly.
 
 ---
 
@@ -29,6 +29,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.6] | GitHub Actions pre-commit and Scope Auditor CI workflow | [`5b7605f`] | 2026-10-02 |
 | [03.5] | Interactive terminal dashboard prototype for active task and DoD checklist | [`e462d77`] | 2026-10-02 |
 | [03.4] | Autonomous agent lifecycle hand-offs on task start (cmd_next) and task completion (cmd_done) | [`e33c6f8`] | 2026-10-02 |
 | [03.3] | Hybrid Scope Auditor with canvas agent delegation fallback | [`e239433`] | 2026-10-02 |
@@ -56,7 +57,6 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-- [ ] Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer)
 - [ ] Cross-repo telemetry aggregation daemon
 
 ---
