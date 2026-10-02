@@ -9,17 +9,22 @@
 
 ### 📌 Task [XX.Y]: [Short descriptive title]
 
-- **Description:** [Awaiting next planned task]
-- **Systems Involved:** []
+- **Description:** Implement distributed tracing context and telemetry spans across taskctl lifecycle transitions and provider operations, including trace propagation (TraceContext / W3C traceparent compatible), span hierarchy, task duration analytics, and alerting thresholds for VictoriaLogs/Vector.
+- **Systems Involved:** [core, telemetry, cli]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash'
 - **Action Type:**
   - [ ] Read-only / Documentation
-  - [ ] Source code changes
+  - [x] Source code changes
 - **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] [Awaiting next planned task criteria]
+- [x] Implement `TraceContext` and `Span` / `Tracer` abstraction in `taskctl.telemetry` with deterministic 128-bit trace ID and 64-bit span ID generation (hex formatted, W3C traceparent / OpenTelemetry compatible).
+- [x] Support root spans and nested child spans for lifecycle phases (`next`, `audit`, `done`, `daemon`, `graph`, and provider adapter calls) with duration tracking in milliseconds.
+- [x] Connect tracing context to `TelemetryEvent`, `VectorSink`, and `TelemetryEmitter` so trace_id, span_id, and parent_span_id are preserved in canonical VictoriaLogs payloads.
+- [x] Add task duration analytics and threshold checks (e.g., alert trigger if task duration or provider execution exceeds SLA thresholds).
+- [x] Expose trace inspection via CLI (e.g. `taskctl trace` or flags) and ensure hermetic unit tests with 100% pass rate.
+- [x] Verify DoD: syntax compile, unittest suite pass, `git diff --check`, and ADR-007 documentation.
 
 ---
 
@@ -27,6 +32,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [04.3] | Task lifecycle distributed tracing & telemetry spans (trace IDs, task duration analytics, VictoriaLogs/Vector alerts) | [`8ff9acd`] | 2026-10-02 |
 | [04.2] | Task dependency graph visualizer (CLI tree, Mermaid generator, TUI DAG viewer & cycle detector) | [`db34834`] | 2026-10-02 |
 | [04.1] | Cross-repo telemetry aggregation daemon and status broadcaster | [`c41588f`] | 2026-10-02 |
 | [03.7] | Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer) | [`eac2934`] | 2026-10-02 |
@@ -46,7 +52,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] `[04.3]` Task lifecycle distributed tracing & telemetry spans (trace IDs, task duration analytics, VictoriaLogs/Vector alerts)
+*(Backlog empty - all milestone epics through [04.3] scheduled or complete)*
 
 ---
 
