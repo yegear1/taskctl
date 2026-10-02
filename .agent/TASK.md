@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [03.3]: Hybrid Scope Auditor with canvas agent delegation fallback
+### 📌 Task [03.4]: Autonomous agent lifecycle hand-offs on task start (`cmd_next`) and task completion (`cmd_done`)
 
-- **Description:** Extend `taskctl.core.auditor` and `taskctl audit` to support hybrid scope auditing with optional canvas agent delegation fallback (`Auditor` or `ScopeAuditor`) for semantic and structural diff verification.
-- **Systems Involved:** [taskctl/core/auditor.py, taskctl/cli.py, tests/test_auditor.py]
+- **Description:** Implement automated agent lifecycle coordination hooks and hand-offs during task start (`taskctl next`) and completion (`taskctl done`), notifying and dispatching context across connected canvas agents.
+- **Systems Involved:** [taskctl/cli.py, taskctl/providers/maestri.py, tests/test_maestri.py]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -19,10 +19,10 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Scope Auditor evaluates local rules first and can delegate complex semantic diff reviews to connected canvas agents.
-- [ ] Graceful fallback to local heuristic audit when Maestri canvas agent is offline or unresponsive.
-- [ ] Telemetry logs hybrid audit decisions and latencies.
-- [ ] Automated hermetic tests cover hybrid execution paths.
+- [ ] Automated hand-off hooks triggered when promoting tasks via `cmd_next` and completing tasks via `cmd_done`.
+- [ ] Context hand-off dispatches task contract updates and instructions to relevant canvas agent roles.
+- [ ] Non-blocking fail-safe execution when canvas or agents are offline.
+- [ ] Automated tests cover lifecycle hand-off transitions.
 
 ---
 
@@ -30,6 +30,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.3] | Hybrid Scope Auditor with canvas agent delegation fallback | [`e239433`] | 2026-10-02 |
 | [03.2] | Canvas topology presets & workspace generator integration in Maestri provider | [`86b86fe`] | 2026-10-02 |
 | [03.1] | Contract engine integration with remote agent canvas | [`9a51fe2`] | 2026-10-02 |
 | [02.2] | Automated commit message Conventional Commits linter & policy | [`e3168c7`] | 2026-10-01 |
@@ -42,7 +43,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[03.4]** Autonomous agent lifecycle hand-offs on task start (`cmd_next`) and task completion (`cmd_done`)
+- [ ] **[03.5]** Interactive terminal dashboard prototype for active task and DoD checklist
 
 ---
 
