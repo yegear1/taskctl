@@ -23,7 +23,8 @@ Commands:
   taskctl done [msg] [-p] [--agent <name>] [--no-handoff]
                            Validate DoD, create double atomic commit (code + governance),
                            dispatch completion hand-off to Auditor/Planner, and trigger webhooks.
-  taskctl lint-commit [msg] [--file <path>]  Validate commit message against Conventional Commits.
+  taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>] [--head]
+                           Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
   taskctl dashboard [--snapshot] [--interval <sec>] [--tests]
@@ -398,9 +399,64 @@ def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
     )
     return verdict.exit_code
 
-def cmd_lint_commit(msg: Optional[str] = None, file_path: Optional[str] = None) -> int:
+def cmd_lint_commit(
+    msg: Optional[str] = None,
+    file_path: Optional[str] = None,
+    rev: Optional[str] = None,
+    commit_range: Optional[str] = None,
+) -> int:
+    if commit_range:
+        res = subprocess.run(
+            ["git", "log", "--pretty=%H", commit_range],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            print(f"[ERROR] Failed to list commits in range '{commit_range}': {res.stderr.strip()}")
+            return 1
+        shas = [s.strip() for s in res.stdout.splitlines() if s.strip()]
+        if not shas:
+            print(f"[WARN] No commits found in range '{commit_range}'.")
+            return 0
+
+        all_passed = True
+        print("\n" + "=" * 58)
+        print(f" 📝 CONVENTIONAL COMMITS LINTER (Range: {commit_range})")
+        print("=" * 58)
+        for sha in shas:
+            c_res = subprocess.run(
+                ["git", "log", "-1", "--pretty=%B", sha],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            raw_c = c_res.stdout
+            val = parse_conventional_commit(raw_c)
+            short_sha = sha[:8]
+            if val.is_valid and val.commit:
+                print(f" ✅ [PASS] {short_sha}: {val.commit.header}")
+            else:
+                all_passed = False
+                print(f" ❌ [FAIL] {short_sha}:")
+                for err in val.errors:
+                    print(f"     - {err}")
+        print("=" * 58 + "\n")
+        return 0 if all_passed else 1
+
     raw_content = ""
-    if file_path:
+    if rev:
+        res = subprocess.run(
+            ["git", "log", "-1", "--pretty=%B", rev],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            print(f"[ERROR] Failed to read git commit at '{rev}': {res.stderr.strip()}")
+            return 1
+        raw_content = res.stdout
+    elif file_path:
         if not os.path.exists(file_path):
             print(f"[ERROR] Commit message file not found: {file_path}")
             return 1
@@ -411,7 +467,7 @@ def cmd_lint_commit(msg: Optional[str] = None, file_path: Optional[str] = None) 
     elif not sys.stdin.isatty():
         raw_content = sys.stdin.read()
     else:
-        print("[ERROR] No commit message provided. Usage: taskctl lint-commit '<message>' or taskctl lint-commit --file <file>")
+        print("[ERROR] No commit message provided. Usage: taskctl lint-commit '<message>' or taskctl lint-commit --file <file> or --rev <rev>")
         return 1
 
     validation = parse_conventional_commit(raw_content)
@@ -901,6 +957,8 @@ def main():
         cmd_notify(msg)
     elif cmd in ["lint-commit", "commit-lint"]:
         file_path = None
+        rev = None
+        commit_range = None
         msg_parts = []
         args = sys.argv[2:]
         i = 0
@@ -908,11 +966,20 @@ def main():
             if args[i] in ["-f", "--file"] and i + 1 < len(args):
                 file_path = args[i + 1]
                 i += 2
+            elif args[i] in ["-r", "--rev"] and i + 1 < len(args):
+                rev = args[i + 1]
+                i += 2
+            elif args[i] in ["--range"] and i + 1 < len(args):
+                commit_range = args[i + 1]
+                i += 2
+            elif args[i] in ["--head"]:
+                rev = "HEAD"
+                i += 1
             else:
                 msg_parts.append(args[i])
                 i += 1
         msg = " ".join(msg_parts) if msg_parts else None
-        sys.exit(cmd_lint_commit(msg=msg, file_path=file_path))
+        sys.exit(cmd_lint_commit(msg=msg, file_path=file_path, rev=rev, commit_range=commit_range))
     elif cmd in ["dashboard", "tui"]:
         snapshot = False
         interval = 2.0

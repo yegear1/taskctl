@@ -159,6 +159,24 @@ class TestLintCommitCLI(unittest.TestCase):
         exit_code = cmd_lint_commit(file_path="/path/that/does/not/exist/ever")
         self.assertEqual(exit_code, 1)
 
+    @patch("taskctl.cli.get_telemetry_emitter")
+    def test_cmd_lint_commit_rev_head(self, mock_emitter):
+        mock_emitter.return_value.emit_lifecycle_event = MagicMock()
+        exit_code = cmd_lint_commit(rev="HEAD")
+        self.assertEqual(exit_code, 0)
+
+    def test_cmd_lint_commit_rev_invalid(self):
+        exit_code = cmd_lint_commit(rev="nonexistent-commit-rev-xyz")
+        self.assertEqual(exit_code, 1)
+
+    def test_cmd_lint_commit_range_valid(self):
+        exit_code = cmd_lint_commit(commit_range="HEAD~2..HEAD")
+        self.assertEqual(exit_code, 0)
+
+    def test_cmd_lint_commit_range_invalid(self):
+        exit_code = cmd_lint_commit(commit_range="nonexistent-branch-a..nonexistent-branch-b")
+        self.assertEqual(exit_code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
