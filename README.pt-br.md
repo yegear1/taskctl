@@ -16,7 +16,8 @@ Ele estabelece uma ponte determinística entre agentes de IA (Antigravity, Claud
   - `1`: **MUDANÇAS REQUERIDAS** — Correções acionáveis necessárias.
   - `2`: **REJEITADO** — Violação crítica de política; escala para o planejador/humano.
 - **📡 Telemetria Não-Bloqueante:** Despachante de webhooks em segundo plano com timeouts e isolamento fail-safe, garantindo que falhas de rede nunca abortem commits ou o fluxo do desenvolvedor.
-- **🔌 Adaptadores de Orquestradores:** Suporte nativo ao Maestri (criação de workspaces, sincronização de notas de cockpit) e Multigravity (roteamento inteligente de perfis e cotas).
+- **🔌 Adaptadores de Provedores Plugáveis:** Suporte nativo a ecossistemas externos como o Maestri (criação de workspaces, notas) e [`multigravity-cli`](https://github.com/yegear1/multigravity-cli) para roteamento de perfis e cotas.
+- **🌐 Arquitetura Aberta e Desacoplada:** O `taskctl` foca exclusivamente na governança e nos contratos de tarefas. O monitoramento aprofundado de cotas, perfis e isolamento de worktrees é delegado a ferramentas especializadas como o `multigravity-cli`, sem criar acoplamento forçado.
 - **🌿 Conformidade Greenfield e Brownfield:** 100% aderente ao template `ye-sandbox/template-agent` e especificação de AST Markdown.
 
 ---

@@ -1,4 +1,8 @@
-"""Multigravity quota routing and profile isolation provider."""
+"""Multigravity quota routing and profile isolation provider.
+
+Designed to interface with the external multigravity-cli project:
+https://github.com/yegear1/multigravity-cli
+"""
 
 import json
 import shutil

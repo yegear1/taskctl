@@ -33,6 +33,11 @@
 - **Decision:** Implement fail-safe background dispatching with strict 2-second timeout.
 - **Consequences:** Developer or agent commits and task transitions are never blocked or aborted by telemetry network failures.
 
+### 2026-10-01 Open Contract Engine & Explicit multigravity-cli Separation
+- **Context:** Preventing domain bloat and overlap between `taskctl` and `multigravity-cli`.
+- **Decision:** `taskctl` remains an open, generic CLI for task lifecycle governance (`TASK.md`, DoD, and scope audit). Quota monitoring, multi-profile switching, and worktree balancing belong exclusively to [`multigravity-cli`](https://github.com/yegear1/multigravity-cli). `taskctl` interfaces via a lightweight provider adapter (`taskctl.providers.multigravity`). Future TUI/dashboards in `taskctl` will focus strictly on task states and DoD checklist, avoiding quota dashboard duplication.
+- **Consequences:** Clean separation of concerns; zero vendor lock-in for general open source users, with turn-key interoperability for the multigravity ecosystem.
+
 ---
 
 ## Active Contracts

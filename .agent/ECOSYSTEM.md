@@ -17,7 +17,7 @@
 | `template-agent` | Upstream Governance Baseline (Greenfield & Brownfield) | `Upstream (Dependency)` | `https://github.com/ye-sandbox/template-agent` | Governance Team |
 | `agent-skills` | Central Skill Library & Cross-Repository Capabilities | `Upstream (Dependency)` | `https://github.com/ye-sandbox/agent-skills` | Core Agents |
 | `maestri` | Spatial Canvas UI & Multi-Agent Terminal Orchestrator | `Downstream (Consumer)` | `Desktop App (Local IPC Socket)` | Orchestration |
-| `multigravity` | Multi-profile Quota Balancer, Isolation & Worktree CLI | `Downstream (Consumer)` | `https://github.com/yegear1/multigravity-cli` | Infrastructure |
+| `multigravity-cli` | Multi-profile Quota Balancer, Isolation & Worktree CLI | `Downstream (Consumer)` | `https://github.com/yegear1/multigravity-cli` | Infrastructure |
 | `victorialogs` | Structured Log & Audit Telemetry Sink | `Downstream (Consumer)` | `https://github.com/ye-sandbox/victorialogs` | Observability |
 
 ---
@@ -39,7 +39,10 @@
 | :--- | :---: | :--- | :--- | :--- |
 | `template-agent` | Git / Filesystem | `.agent/TASK.md`, `AGENTS.md` | Markdown AST Spec | Graceful regex fallback |
 | `maestri` | UNIX Domain Socket | `$MAESTRI_SOCKET_PATH` | JSON-RPC / IPC commands | Degrade to terminal stdout |
-| `multigravity` | CLI Subprocess | `agy profile status --json` | JSON output | Fallback to default profile |
+| `multigravity-cli` | CLI Subprocess | `multigravity quota --json` | JSON output | Fallback to default profile |
+
+> **Architectural Separation of Concerns:**
+> `taskctl` is an open, generic task contract engine (governing `.agent/TASK.md` transitions, scope audit, and DoD enforcement). It intentionally delegates multi-profile quota balancing, worktree management, and agent quota monitoring to [`multigravity-cli`](https://github.com/yegear1/multigravity-cli) via thin pluggable adapters to prevent feature overlap.
 
 ### B. Exposed by this Repository (Downstream Consumers)
 

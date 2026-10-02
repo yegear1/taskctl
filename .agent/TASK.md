@@ -47,7 +47,7 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-- [ ] Interactive terminal dashboard with `rich` or `curses`
+- [ ] Interactive terminal dashboard (`taskctl tui` / `rich` or `curses`) focused strictly on task lifecycle (active task, DoD checklist, and audit diffs) — leaving quota/profile views to [`multigravity-cli`](https://github.com/yegear1/multigravity-cli)
 - [ ] GitHub Actions pre-commit check workflow
 
 ---

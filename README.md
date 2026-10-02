@@ -16,7 +16,8 @@ It provides a deterministic bridge between AI coding agents (Antigravity, Claude
   - `1`: **CHANGES REQUIRED** — Actionable corrections needed.
   - `2`: **REJECTED** — Critical policy violation; escalates to planner/human.
 - **📡 Non-Blocking Telemetry:** Background webhook dispatcher with timeouts and circuit-breaker isolation, ensuring network drops never abort commits or developer workflows.
-- **🔌 Multi-Agent Provider Adapters:** Native support for Maestri spatial canvases (workspace creation, note synchronization) and Multigravity quota-aware profile routing.
+- **🔌 Pluggable Provider Adapters:** Native support for external platforms such as Maestri spatial canvases and [`multigravity-cli`](https://github.com/yegear1/multigravity-cli) for quota-aware profile routing.
+- **🌐 Open & Decoupled Architecture:** `taskctl` strictly governs task contracts and lifecycle states. It leaves multi-profile quota tracking and worktree balancing to external tools like `multigravity-cli` without hard dependencies.
 - **🌿 Greenfield & Brownfield Compliance:** 100% compliant with the `ye-sandbox/template-agent` governance and Markdown AST specification.
 
 ---
