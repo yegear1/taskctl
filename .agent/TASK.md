@@ -11,7 +11,7 @@
 
 - **Description:** [Awaiting next planned task]
 - **Systems Involved:** []
-- **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
+- **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash'
 - **Action Type:**
   - [ ] Read-only / Documentation
   - [ ] Source code changes
@@ -27,6 +27,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [04.2] | Task dependency graph visualizer (CLI tree, Mermaid generator, TUI DAG viewer & cycle detector) | [`db34834`] | 2026-10-02 |
 | [04.1] | Cross-repo telemetry aggregation daemon and status broadcaster | [`c41588f`] | 2026-10-02 |
 | [03.7] | Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer) | [`eac2934`] | 2026-10-02 |
 | [03.6] | GitHub Actions pre-commit and Scope Auditor CI workflow | [`5b7605f`] | 2026-10-02 |
@@ -45,7 +46,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-*(Backlog empty — awaiting new roadmap planning)*
+- [ ] `[04.3]` Task lifecycle distributed tracing & telemetry spans (trace IDs, task duration analytics, VictoriaLogs/Vector alerts)
 
 ---
 
@@ -57,7 +58,7 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-- [ ] Interactive task dependency graph visualizer
+*(Future backlog empty)*
 
 ---
 
