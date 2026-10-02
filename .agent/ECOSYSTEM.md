@@ -1,6 +1,6 @@
 # Multi-Repository Ecosystem Topology & Contracts (ECOSYSTEM.md)
 
-> 🎯 **Purpose:** Canonical source of truth for topology, sibling services, shared contracts, and cross-repo boundaries in a multi-repository ecosystem.
+> 🎯 **Purpose:** Canonical source of truth for topology, sibling services, shared contracts, and cross-repo boundaries in the agent tooling ecosystem.
 >
 > ⚠️ **Mandatory Rules for the Agent:**
 > 1. You MUST NOT break active contracts consumed by sibling repositories without an expand/contract deprecation period.
@@ -11,27 +11,23 @@
 
 ## 1. Repository Topology Matrix
 
-> Record all related repositories in the application ecosystem and this project's relationship with each.
-
 | Repository | Role / Responsibility | Relationship | Location / Repository URL | Owner / Team |
 | :--- | :--- | :---: | :--- | :--- |
-| **`[current-repo]`** *(Current)* | [e.g., Core business domain & REST API] | `Self` | `[https://github.com/org/current-repo]` | [Domain Team] |
-| `[sibling-frontend]` | [e.g., Client web interface (Svelte / React)] | `Downstream (Consumer)` | `[https://github.com/org/frontend]` | [Frontend Team] |
-| `[sibling-worker]` | [e.g., Async task processing / queues] | `Downstream (Consumer)` | `[https://github.com/org/worker]` | [Backend Team] |
-| `[shared-contracts]` | [e.g., Central OpenAPI specs, types, or protobufs] | `Upstream (Dependency)` | `[https://github.com/org/contracts]` | [Platform Team] |
-
-*(Relationships: `Self` [this repository], `Upstream (Dependency)` [this repo consumes it], `Downstream (Consumer)` [it consumes this repo], `Peer` [bidirectional communication])*
+| **`taskctl`** *(Current)* | Task Lifecycle, Contract Engine & Multi-Agent CLI | `Self` | `https://github.com/yegear1/taskctl` | Platform Team |
+| `template-agent` | Upstream Governance Baseline (Greenfield & Brownfield) | `Upstream (Dependency)` | `https://github.com/ye-sandbox/template-agent` | Governance Team |
+| `agent-skills` | Central Skill Library & Cross-Repository Capabilities | `Upstream (Dependency)` | `https://github.com/ye-sandbox/agent-skills` | Core Agents |
+| `maestri` | Spatial Canvas UI & Multi-Agent Terminal Orchestrator | `Downstream (Consumer)` | `Desktop App (Local IPC Socket)` | Orchestration |
+| `multigravity` | Multi-profile Quota Balancer, Isolation & Worktree CLI | `Downstream (Consumer)` | `https://github.com/yegear1/multigravity-cli` | Infrastructure |
+| `victorialogs` | Structured Log & Audit Telemetry Sink | `Downstream (Consumer)` | `https://github.com/ye-sandbox/victorialogs` | Observability |
 
 ---
 
 ## 2. Shared Contracts & Source of Truth
 
-> Declare how external data contracts and schemas are published, consumed, and kept in sync.
-
-- **Contract Strategy:** `[Local specs/ | Git Submodule | Package Manager (NPM/PyPI) | Sibling Directory]`
-- **Contract Format:** `[OpenAPI 3.1 | AsyncAPI | Protobuf / gRPC | JSON Schema | TypeScript DTOs]`
-- **Sync Command / Workflow:** `[e.g., npm run sync:contracts | buf generate | make proto]`
-- **Drift Prevention:** Every change affecting public payloads MUST regenerate and validate schemas before marking tasks complete.
+- **Contract Strategy:** Local `.agent/TASK.md` format specification compliant with `template-agent` greenfield/brownfield AST schemas.
+- **Contract Format:** Markdown AST + JSON Schema for Webhook Telemetry.
+- **Sync Command / Workflow:** `taskctl audit` validates diffs and markdown invariant integrity.
+- **Drift Prevention:** Every change affecting `TASK.md` parsing or serialization MUST be verified against `tests/test_parser.py` and `tests/test_webhooks.py`.
 
 ---
 
@@ -39,49 +35,27 @@
 
 ### A. Consumed by this Repository (Upstream Dependencies)
 
-> Interfaces, services, or events this repository depends upon to function.
-
 | Source Service | Protocol / Transport | Target Endpoint / Topic | Contract / Schema | Fallback / Blast Radius |
 | :--- | :---: | :--- | :--- | :--- |
-| `[auth-service]` | HTTP / REST | `POST /oauth/token` | Bearer JWT (`sub`, `roles`) | Fail-closed (HTTP 401) |
-| `[event-bus]` | AMQP / Kafka | `events.billing.completed` | `BillingCompletedEvent` | Dead-letter queue retry |
+| `template-agent` | Git / Filesystem | `.agent/TASK.md`, `AGENTS.md` | Markdown AST Spec | Graceful regex fallback |
+| `maestri` | UNIX Domain Socket | `$MAESTRI_SOCKET_PATH` | JSON-RPC / IPC commands | Degrade to terminal stdout |
+| `multigravity` | CLI Subprocess | `agy profile status --json` | JSON output | Fallback to default profile |
 
 ### B. Exposed by this Repository (Downstream Consumers)
 
-> Public APIs, webhooks, or published events exposed to sibling repositories.
-
 | Route / Topic | Consumer(s) | Payload / Schema | Breaking Change Risk | Deprecation Policy |
 | :--- | :--- | :--- | :---: | :--- |
-| `POST /api/v1/orders` | `[sibling-frontend]`, `[mobile-app]` | `CreateOrderDto` | **HIGH** | 2 release cycles |
-| `orders.status.changed`| `[sibling-worker]` | `OrderStatusChangedEvent` | **MEDIUM** | Expand & contract |
-
-*(Risk levels: **HIGH** [external clients / mobile with delayed rollout], **MEDIUM** [internal controlled services], **LOW** [internal non-blocking logs/metrics])*
+| `WebhookDispatcher` | Vector / Telemetry Listeners | Task lifecycle event JSON (`task_started`, `audit`, `task_completed`) | **LOW** | Expand & contract |
+| CLI Exit Codes | CI / Git Pre-commit Hooks | Semantic exit codes (`0: Approved`, `1: Changes Required`, `2: Rejected`) | **HIGH** | Strict SemVer |
 
 ---
 
 ## 4. Blast Radius & Contract Evolution Rules
 
 1. **Additive-First (Expand / Contract):**
-   - NEVER delete, rename, or change data types of existing fields in active contracts directly.
-   - Step 1: Add new field as optional.
-   - Step 2: Mark old field as `@deprecated` with target decommission date.
-   - Step 3: Migrate consumers to the new field.
-   - Step 4: Remove deprecated field only after all consumers confirmed migrated.
+   - Never remove or alter existing CLI flag semantics or JSON telemetry keys without deprecation.
 2. **Hermetic Testing & Zero Cross-Repo Mutation:**
-   - Automated test suites MUST NOT require live network access to sibling services.
-   - Use contract-driven mocks (e.g., WireMock, MSW, Prism, or fixture recordings).
-   - The agent MUST NOT attempt to edit sibling repositories directly during a single task run.
-3. **Cross-Repo Task Sequencing:**
-   - When a feature requires coordinated changes across repositories:
-     1. Producer updates and deploys the contract additively.
-     2. Record the downstream migration task in `.agent/TASK.md` or the team tracker.
-     3. Consumer updates in a separate task/repository context.
-
----
-
-## 5. Adaptation Checklist (delete this section when setup is done)
-
-- [ ] Topology matrix updated with real sibling repository names and roles.
-- [ ] Contract strategy and sync commands documented in Section 2.
-- [ ] Active cross-repo APIs and events cataloged in Section 3.
-- [ ] If this project is a standalone single-repo with zero sibling services, delete this file and remove its trigger in `AGENTS.md`.
+   - Automated tests in `tests/` must never require a live Maestri socket, Multigravity profile daemon, or active network webhook endpoint.
+   - All external provider and webhook tests must be mocked or hermetically tested.
+3. **Fail-Safe Operation:**
+   - Network timeouts or missing sockets must never block `taskctl done` or break git commit execution.

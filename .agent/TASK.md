@@ -9,17 +9,17 @@
 
 ### 📌 Task [XX.Y]: [Short descriptive title]
 
-- **Description:** [2–4 lines for the agent to devise a plan.]
-- **Systems Involved:** [e.g. `api-service`, `frontend`]
+- **Description:** [Awaiting next planned task or instructions]
+- **Systems Involved:** [taskctl, core, cli]
+- **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
-  - [ ] Source code changes
+  - [x] Source code changes
 - **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] [Verifiable criterion 1]
-- [ ] [Verifiable criterion 2]
+- [ ] Criteria pending next task promotion
 
 ---
 
@@ -27,14 +27,15 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
-| [00.0] | Initial scaffolding (ADD greenfield) | [`0000000`] | [YYYY-MM-DD] |
+| [00.0] | Initial scaffolding (ADD greenfield template) | [`1d74dac`] | 2026-10-01 |
+| [01.1] | Taskctl core engine, CLI, providers, and test suite | [`8875338`] | 2026-10-01 |
 
 ---
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[00.1]** [Setup stack, linters, and validation commands] — `[setup]`
-- [ ] **[01.1]** [First foundation epic] — `[system]`
+- [ ] **[01.2]** [Scope auditor rule-based policy expansion] — `[core]`
+- [ ] **[02.1]** [Advanced provider telemetry & Vector direct sink integration] — `[telemetry]`
 
 ---
 
@@ -46,7 +47,8 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-*(empty)*
+- [ ] Interactive terminal dashboard with `rich` or `curses`
+- [ ] GitHub Actions pre-commit check workflow
 
 ---
 

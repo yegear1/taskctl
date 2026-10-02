@@ -17,36 +17,38 @@
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| | *(none yet)* | | |
+| [ADR-001](adr/001-modular-cli-architecture.md) | Modular CLI Architecture & Fail-Safe Webhook Dispatcher | Approved | 2026-10-01 |
 
 ---
 
 ## Quick Decisions
 
-### [YYYY-MM-DD] [Title]
+### 2026-10-01 Greenfield Baseline Scaffolding
+- **Context:** Establishing the official repository foundation for `taskctl`.
+- **Decision:** Adopt the ADD Greenfield template from `ye-sandbox/template-agent` (branch `greenfield`).
+- **Consequences:** All task lifecycle and agent interactions adhere to standard ADD contracts (`.agent/TASK.md`, `.agent/ECOSYSTEM.md`, `.agent/skills/`).
 
-- **Context:** […]
-- **Decision:** […]
-- **Alternatives Considered:** […]
-- **Consequences:** […]
+### 2026-10-01 Non-Blocking Webhook Telemetry
+- **Context:** Sending lifecycle notifications to external dashboards or vector sinks.
+- **Decision:** Implement fail-safe background dispatching with strict 2-second timeout.
+- **Consequences:** Developer or agent commits and task transitions are never blocked or aborted by telemetry network failures.
 
 ---
 
 ## Active Contracts
 
-Full schemas live in code (`[core/schemas/]`). This table maps high-level contracts:
-
 | Channel / Route | Producer | Consumer | Payload |
 |---|---|---|---|
-| | | | |
-
-Contract changes require updating schemas on both sides within the same task.
+| `.agent/TASK.md` | `taskctl` / Agent | `taskctl.core.parser` | Markdown AST task schema |
+| `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
+| `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
 
 ---
 
 ## Gotchas & Pitfalls
 
-- **[Lib/Service]:** [unexpected behavior and mitigation]
+- **Parser Flexibility:** Section headers like `## Backlog` or `## Backlog (Upcoming, in priority order)` must be parsed robustly without failing on parenthesized comments.
+- **Zero-Crash Telemetry:** Never raise exceptions if `TASKCTL_WEBHOOK_URL` is unreachable or returns 5xx.
 
 ---
 
@@ -54,4 +56,4 @@ Contract changes require updating schemas on both sides within the same task.
 
 | Debt | Rationale | Revisit When |
 |---|---|---|
-| | | |
+| Basic `git diff --check` in audit | Fast initial gate for git hygiene without heavy linter setup | When custom domain lint rules are requested |

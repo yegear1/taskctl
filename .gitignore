@@ -1,38 +1,59 @@
-# Secrets — never commit
+# Python Bytecode and Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution & Build
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
 .env
-.env.*
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets
 !.env.example
 
-# High-frequency junk (safe before you pick a stack)
-node_modules/
-.venv/
-venv/
-__pycache__/
-dist/
-build/
-*.log
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
 
-# OS / IDE / agent scratch
+# IDEs & OS Cruft
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
-.agent/scratch/
-.gemini/
-.claude/
+*.swp
+*.swo
 
-# Uncomment extras for your stack:
-# --- Python ---
-# *.py[cod]
-# .pytest_cache/
-# .mypy_cache/
-# .ruff_cache/
-# htmlcov/
-# .coverage
-# *.egg-info/
-# --- Node ---
-# .next/
-# .nuxt/
-# .turbo/
-# .parcel-cache/
-# npm-debug.log*
+# Multi-Agent Tooling & Orchestration
+.maestri/
+*.tsbuildinfo

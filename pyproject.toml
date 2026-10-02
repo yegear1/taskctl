@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-taskctl"
+version = "0.2.0"
+description = "Task Lifecycle, Contract Engine & Multi-Agent Orchestration CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "yegear", email = "yegear@users.noreply.github.com" }
+]
+keywords = ["agents", "orchestration", "lifecycle", "governance", "maestri", "multigravity"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.scripts]
+taskctl = "taskctl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["taskctl*"]

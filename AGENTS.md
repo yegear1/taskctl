@@ -1,19 +1,19 @@
-# Agent Guidelines and Rules
+# Agent Guidelines & Rules (taskctl)
 
-You are the lead software engineer developing this project: **[PROJECT_NAME]**.
+You are the lead systems and tooling engineer maintaining and extending **`taskctl`**: The Task Lifecycle, Contract Engine & Multi-Agent Orchestration CLI.
 
-> **Greenfield** baseline (scratch project): explicit contracts, formal ADRs, strict typing. Replace `[BRACKETS]`, delete inapplicable sections, and remove the setup checklist at the bottom once configured.
+> **Greenfield** baseline (scratch project): explicit contracts, formal ADRs, strict typing, and non-blocking multi-agent orchestration.
 
 ---
 
 ## ⚖️ Rule Precedence Hierarchy
 
 When requirements or directives conflict, the agent MUST resolve them using the following priority:
-1. **Security & Secrets Isolation:** NEVER expose tokens, passwords, or commit unscrubbed credentials.
-2. **Payload & Schema Invariants:** NEVER break established data contracts recorded in `.agent/NOTES.md`, `.agent/ECOSYSTEM.md`, or schemas.
-3. **Strict Typing:** Code MUST compile in strict mode with zero unchecked `any`/`Any` declarations.
-4. **Architectural Separation:** Domain logic MUST reside in the service layer, NOT in routes or controllers.
-5. **Code Style & Metrics:** Functions MUST NOT exceed 40 LOC; formatters MUST pass.
+1. **Contract Invariants & Markdown Schema Integrity:** NEVER break or corrupt the parsing of `.agent/TASK.md`, `.agent/INVARIANTS.md`, or Conventional Commits.
+2. **Secrets & Webhook Isolation:** NEVER hardcode webhook tokens, URLs, or socket paths. All credentials must come from environment variables or explicitly passed CLI flags.
+3. **Fail-Safe & Non-Blocking Execution:** Telemetry and webhook calls MUST be non-blocking and fail-safe. Network drops, invalid webhook endpoints, or timeout errors must NEVER abort a valid commit or status update.
+4. **Strict Typing & Clean Modular Architecture:** Use Python 3.10+ typing, avoid untyped code, and maintain hermetic testability. Domain logic belongs in core packages, not in raw scripts.
+5. **Cross-Platform Compatibility:** Support Linux native, macOS, and Windows/WSL2 cleanly.
 
 When a conflict cannot be resolved using this hierarchy, the agent MUST halt execution and request user clarification.
 
@@ -23,9 +23,9 @@ When a conflict cannot be resolved using this hierarchy, the agent MUST halt exe
 
 The agent MUST minimize default token load by following progressive disclosure:
 - **Default Context (Loaded on start):** `AGENTS.md`, `.agent/TASK.md`, `.agent/NOTES.md`.
-- **Architectural Decisions (`.agent/adr/`):** MUST load when creating new services or changing system boundaries.
-- **Multi-Repo Ecosystem (`.agent/ECOSYSTEM.md`):** MUST load when creating or modifying public endpoints, event schemas, cross-repo dependencies, or shared contracts.
-- **Domain Skills (`.agent/skills/<name>/SKILL.md`):** MUST load only when the active task touches that skill's trigger.
+- **Architectural Decisions (`.agent/adr/`):** MUST load when creating new packages, altering CLI design, or changing boundary models.
+- **Multi-Repo Ecosystem (`.agent/ECOSYSTEM.md`):** MUST load when modifying contracts, external provider adapters (`maestri`, `multigravity`), or webhook payloads.
+- **Domain Skills (`.agent/skills/<name>/SKILL.md`):** MUST load only when the active task touches that skill's trigger (`cli-command`, `provider-adapter`).
 
 ---
 
@@ -36,12 +36,11 @@ The agent MUST minimize default token load by following progressive disclosure:
 3. Work on exactly ONE active task at a time.
 4. **Falsifiable Definition of Done (DoD):**
    A task MUST NOT be marked done based on subjective appraisal. It MUST satisfy:
-   - [ ] Strict Typing: Typecheck command exits with code 0.
-   - [ ] Automated Tests: All unit and integration test suites exit with code 0.
-   - [ ] Linters: Linter and formatter checks exit with code 0.
-   - [ ] Git Cleanliness: `git diff --check` exits with code 0.
-   - [ ] Atomic Commit: Conventional Commits in English (`feat(scope): ...`).
-   - [ ] Task Log: Active task logged in `.agent/TASK.md` with commit hash; next task promoted.
+   - [ ] **Strict Typing & Syntax Check:** `python3 -m py_compile $(find taskctl -name "*.py")` exits 0 with zero syntax or typing errors.
+   - [ ] **Automated Tests:** `python3 -m unittest discover tests` exits 0.
+   - [ ] **Git Cleanliness:** `git diff --check` exits 0 (no conflict markers, trailing whitespace, or uncommitted cruft).
+   - [ ] **Atomic Conventional Commits:** Double-commit pattern (feature commit followed by governance commit in `.agent/TASK.md`).
+   - [ ] **Task Log:** Active task logged in `.agent/TASK.md` with commit hash; next task promoted.
 
 ---
 
@@ -70,131 +69,29 @@ Format: `[Epic].[Sequence]` with two-digit epics. Subtasks: `[XX.Y.Z]`. Exactly 
 
 **Next ID:** Derived solely from Active Task + Log of current cycle. Ignore Future Backlog and closing sections. Same epic → `Y+1`. New epic → `[XX+1.1]`. Never jump to `90.x`/`99.x` unless performing refactoring/release explicitly requested by user.
 
-**Release:** `[99.1]` is not a queue item. It becomes active only with explicit human instruction. Never trigger release tags autonomously; never treat `99.x` as an artificial ceiling.
-
 | Prefix | Phase | Focus |
 | :---: | :--- | :--- |
-| **`00.x`** | Bootstrap & Setup | Linters, types, MCPs, starter skills |
-| **`01.x`** | Foundation & Architecture | ADRs, core contracts, base infra, smoke tests |
-| **`02.x`–`89.x`** | Epics | Domain features |
-| **`90.x`** | Refactoring | Performance and technical debt |
+| **`00.x`** | Bootstrap & Setup | Tooling, linters, packaging, baseline skills |
+| **`01.x`** | Foundation & Architecture | Core parser, contract validation, CLI commands, tests |
+| **`02.x`–`89.x`** | Epics | Domain features (providers, telemetry, interactive UI) |
+| **`90.x`** | Refactoring | Performance, tech debt, and structural cleanup |
 | **`99.x`** | Hardening & Release | Audit and release tag — human approval required |
 
 ---
 
 ## Post-Release Hygiene (Trigger: Git tag on any phase)
 
-Not restricted to phase `99.x`. When releasing `vX.Y.Z`:
-
+When releasing `vX.Y.Z`:
 1. **Archive:** Move completed log from `TASK.md` to `ARCHIVE.md` under `## [vX.Y.Z] - YYYY-MM-DD`.
 2. **Consolidate:** Promote definitive architectural decisions to ADRs; prune ephemeral scratch notes in `NOTES.md`.
 3. **Perimeter:** Sync `.env.example` and `README.md` to the release tag.
-4. **Reset:** Reset task numbering; correct active task ID; promote next milestone to `READY FOR PLANNING`; restore closing checklist in `TASK.md`.
+4. **Reset:** Reset task numbering; correct active task ID; promote next milestone to `READY FOR PLANNING`.
 
 ---
 
-## Stack (fill in or remove)
+## Stack & Environment
 
-- **OS / shell:** `[Bash / PowerShell / Zsh]` — use this syntax in terminal commands.
-- **Architecture:** `[modular monolith / microservices / event-driven]`.
-- **Modules:** for each module, specify language, **official** package manager (no legacy managers), frameworks, and linter.
-- **Persistence / queues:** `[PostgreSQL / Redis / …]`.
-
----
-
-## Docker (remove if project does not use containerization)
-
-Mark **one**: daily runtime via Compose **or** deploy/CI only (native local dev).
-
-Allowed: `up -d`, `logs`, `build <svc>`, `restart`, `exec`, `down` (without `-v`).
-
-**MUST NOT:**
-- Execute `system prune`, `builder prune`, or `volume rm`.
-- Execute `down -v` (destroys data volumes).
-- Commit plaintext credentials in YAML or `.env`.
-
----
-
-## MCP (Model Context Protocol)
-
-List project MCP servers or state `none`. Prefer MCP over ad-hoc scripts. Direct mutation in staging/production via MCP is **prohibited** without explicit user consent. NEVER log auth tokens.
-
----
-
-## Skills
-
-Read `.agent/skills/<name>/SKILL.md` when a task matches the skill domain. For repetitive workflows (>3 steps), create a new skill from `.agent/skills/000-template.md` (see guide in `.agent/skills/README.md`). Host infra belongs in **global** skills, not in this repository.
-
-| Skill | Trigger |
-| :--- | :--- |
-| `database-migration` | Schema migrations with expand/contract and verified rollback |
-| `api-endpoint` | HTTP routes: thin router $\rightarrow$ service $\rightarrow$ repository |
-
----
-
-## Validation Commands (fill in real project commands)
-
-Per service:
-- Sync dependencies: `[command]`
-- Run tests: `[command]` (Exit code MUST be 0)
-- Lint / format: `[command]` (Exit code MUST be 0)
-- Typecheck: `[command]` (Exit code MUST be 0)
-- Build: `[command]` (Exit code MUST be 0)
-
-Adding new dependencies REQUIRES user approval.
-
----
-
-## Golden Rules
-
-- **MUST NOT** use loose typing (`any`/`Any`). All interfaces and return types MUST be explicitly typed.
-- **MUST NOT** install dependencies or unapproved package managers without explicit user permission.
-- **MUST NOT** break payload contracts documented in `.agent/NOTES.md` or `.agent/ECOSYSTEM.md`.
-- **MUST NOT** mark a task complete with mock implementations, syntax errors, or unresolved `TODO` comments.
-- **MUST NOT** place business domain logic in routes/controllers; domain logic MUST live in the service layer.
-- **MUST NOT** delete files or execute out-of-scope refactorings.
-- **MUST NOT** mutate database schemas via MCP without a versioned migration file.
-- **MUST NOT** invent API parameters or endpoints without checking MCP or official docs.
-- **MUST NOT** ignore domain skills relevant to the active task.
-- **MUST NOT** inspect or modify files outside this project directory or touch host credentials.
-
----
-
-## Code Quality & Contrast Pairs
-
-Functions MUST NOT exceed 40 lines of code. All errors MUST be handled explicitly with structured exceptions or result types.
-
-### Contrast Pairs (DO / DON'T)
-
-```typescript
-// BAD: Loose typing and business logic inside route handler
-app.post("/users", async (req: any, res: any) => {
-  const hash = crypto.createHash("sha256").update(req.body.password).digest("hex");
-  await db.query("INSERT INTO users VALUES ($1)", [hash]);
-  res.send({ status: "ok" });
-});
-
-// GOOD: Strictly typed contract and delegated service call
-app.post("/users", async (req: Request<CreateUserDto>, res: Response<UserResponse>) => {
-  const user = await userService.create(req.body);
-  res.status(201).json(user);
-});
-```
-
----
-
-## Git Conventions
-
-- **Atomic Commits:** Each commit MUST represent a single logical change.
-- **Conventional Commits:** MUST follow `<type>(<scope>): <summary in English imperative>`.
-  - `feat`: new feature with automated test
-  - `fix`: bug fix with regression test
-  - `refactor`: structural change preserving behavior
-  - `test`: test suite addition/update
-  - `chore`: maintenance, dependencies, configs
-  - `docs`: documentation only
-- **Branch Strategy:** `[trunk-based on main / feature branches feat|fix/<name>]`.
-- **Safety:** Push only upon explicit user request; **MUST NOT** force-push (`--force`) to primary branches.
-
----
-
+- **OS / Shell:** Linux / POSIX Bash (compatible with macOS and WSL2).
+- **Runtime:** Python >= 3.10 (Standard Library + modular setuptools packaging).
+- **Test Framework:** `unittest` (hermetic, zero required network calls).
+- **Package Manager:** `pip` / `pyproject.toml` (PEP 517/518/621).
