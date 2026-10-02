@@ -7,7 +7,7 @@
 
 ## Active Task
 
-### 📌 Task [03.2]: Canvas topology presets & workspace generator integration in Maestri provider
+### 📌 Task [XX.Y]: [Short descriptive title]
 
 - **Description:** Extend `taskctl.providers.maestri` and `taskctl ws` to support multi-agent topology presets (`trinity`, `swarm`, `audit`) and configurable workspace layout generators for the Maestri spatial canvas environment.
 - **Systems Involved:** [taskctl/providers/maestri.py, taskctl/cli.py, tests/test_maestri_provider.py]
@@ -19,10 +19,10 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] `taskctl ws` CLI supports `--preset <name>` (e.g. trinity, swarm, audit) and `--workers <n>`.
-- [ ] Maestri provider resolves custom workspace canvas generators and layout definitions with graceful fallback.
-- [ ] Automated tests cover CLI flag parsing and provider delegation with hermetic mocks.
-- [ ] Strict typing verified with `python3 -m py_compile`.
+- [x] `taskctl ws` CLI supports `--preset <name>` (e.g. trinity, swarm, audit) and `--workers <n>`.
+- [x] Maestri provider resolves custom workspace canvas generators and layout definitions with graceful fallback.
+- [x] Automated tests cover CLI flag parsing and provider delegation with hermetic mocks.
+- [x] Strict typing verified with `python3 -m py_compile`.
 
 ---
 
@@ -30,6 +30,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.2] | Canvas topology presets & workspace generator integration in Maestri provider | [`86b86fe`] | 2026-10-02 |
 | [03.1] | Contract engine integration with remote agent canvas | [`9a51fe2`] | 2026-10-02 |
 | [02.2] | Automated commit message Conventional Commits linter & policy | [`e3168c7`] | 2026-10-01 |
 | [00.0] | Initial scaffolding (ADD greenfield template) | [`1d74dac`] | 2026-10-01 |
