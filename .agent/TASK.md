@@ -7,14 +7,14 @@
 
 ## Active Task
 
-### 📌 Task [03.1]: Contract engine integration with remote agent canvas
+### 📌 Task [XX.Y]: [Short descriptive title]
 
-- **Description:** Implement contract engine integration with remote agent canvas (Maestri IPC & canvas note sync).
-- **Systems Involved:** [providers, maestri, core]
+- **Description:** [Awaiting next planned task]
+- **Systems Involved:** []
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
-  - [x] Source code changes
+  - [ ] Source code changes
 - **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
@@ -27,6 +27,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.1] | Contract engine integration with remote agent canvas | [`9a51fe2`] | 2026-10-02 |
 | [02.2] | Automated commit message Conventional Commits linter & policy | [`e3168c7`] | 2026-10-01 |
 | [00.0] | Initial scaffolding (ADD greenfield template) | [`1d74dac`] | 2026-10-01 |
 | [01.1] | Taskctl core engine, CLI, providers, and test suite | [`8875338`, `d3de1aa`] | 2026-10-01 |
