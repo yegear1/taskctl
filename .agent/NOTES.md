@@ -19,6 +19,7 @@
 |---|---|---|---|
 | [ADR-001](adr/001-modular-cli-architecture.md) | Modular CLI Architecture & Fail-Safe Webhook Dispatcher | Approved | 2026-10-01 |
 | [ADR-002](adr/002-vector-telemetry-sink.md) | VictoriaLogs & Vector Direct Sink Integration with Provider Telemetry | Approved | 2026-10-01 |
+| [ADR-003](adr/003-conventional-commits-policy.md) | Conventional Commits Policy Engine & Scope Auditor Integration | Approved | 2026-10-01 |
 
 ---
 
@@ -39,6 +40,11 @@
 - **Decision:** `taskctl` remains an open, generic CLI for task lifecycle governance (`TASK.md`, DoD, and scope audit). Quota monitoring, multi-profile switching, and worktree balancing belong exclusively to [`multigravity-cli`](https://github.com/yegear1/multigravity-cli). `taskctl` interfaces via a lightweight provider adapter (`taskctl.providers.multigravity`). Future TUI/dashboards in `taskctl` will focus strictly on task states and DoD checklist, avoiding quota dashboard duplication.
 - **Consequences:** Clean separation of concerns; zero vendor lock-in for general open source users, with turn-key interoperability for the multigravity ecosystem.
 
+### 2026-10-01 Automated Conventional Commits Policy & Scope Auditor Integration
+- **Context:** Ensuring commit history consistency for changelog generators and release auditing without external npm/pip dependencies.
+- **Decision:** Implement standard Conventional Commits 1.0.0 parser in `taskctl.core.commits`, wire `CommitConventionRule` into `ScopeAuditor`, add `taskctl lint-commit` CLI, and guard `taskctl done`.
+- **Consequences:** Hermetic commit validation with zero external dependencies; full support for Git `commit-msg` hooks.
+
 ---
 
 ## Active Contracts
@@ -47,6 +53,7 @@
 |---|---|---|---|
 | `.agent/TASK.md` | `taskctl` / Agent | `taskctl.core.parser` | Markdown AST task schema |
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
+| `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs NDJSON/JSON |
 

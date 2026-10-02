@@ -14,6 +14,7 @@ from taskctl.core.auditor import (
     TaskContractRule,
     SyntaxCompilationRule,
     SecretsBoundaryRule,
+    CommitConventionRule,
     ScopeAuditor,
 )
 
@@ -130,6 +131,46 @@ class TestScopeAuditor(unittest.TestCase):
             self.assertEqual(result.severity, AuditSeverity.REJECTED)
             self.assertEqual(result.exit_code, 2)
             self.assertIn("Security boundary violation", result.message)
+
+    def test_commit_convention_rule_no_commits(self):
+        rule = CommitConventionRule()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="fatal: ambiguous argument 'HEAD'")
+            result = rule.evaluate(self.repo_path)
+            self.assertEqual(result.severity, AuditSeverity.APPROVED)
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("skipped", result.message)
+
+    def test_commit_convention_rule_valid_commit(self):
+        rule = CommitConventionRule()
+        with patch("subprocess.run") as mock_run:
+            # First call for rev-parse (rc=0), second for git log
+            mock_run.side_effect = [
+                MagicMock(returncode=0),
+                MagicMock(returncode=0, stdout="feat(core): implement conventional commits\n"),
+            ]
+            result = rule.evaluate(self.repo_path)
+            self.assertEqual(result.severity, AuditSeverity.APPROVED)
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("conforms to Conventional Commits", result.message)
+
+    def test_commit_convention_rule_invalid_commit(self):
+        rule = CommitConventionRule()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),
+                MagicMock(returncode=0, stdout="unconventional commit subject\n"),
+            ]
+            result = rule.evaluate(self.repo_path)
+            self.assertEqual(result.severity, AuditSeverity.CHANGES_REQUIRED)
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("violates Conventional Commits", result.message)
+
+    def test_scope_auditor_default_rules(self):
+        auditor = ScopeAuditor()
+        rule_names = [r.rule_name for r in auditor.rules]
+        self.assertIn("commit-convention", rule_names)
+        self.assertEqual(len(rule_names), 5)
 
     def test_scope_auditor_aggregate(self):
         mock_rule1 = MagicMock()

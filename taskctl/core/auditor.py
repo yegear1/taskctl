@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from taskctl.core.parser import parse_task_md
+from taskctl.core.commits import parse_conventional_commit
 
 
 class AuditSeverity(IntEnum):
@@ -235,6 +236,66 @@ class SecretsBoundaryRule:
         )
 
 
+class CommitConventionRule:
+    """Verifies that the latest git commit on the current branch complies with Conventional Commits."""
+
+    rule_name: str = "commit-convention"
+
+    def evaluate(self, repo_path: Path) -> RuleResult:
+        try:
+            rev_check = subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD"],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if rev_check.returncode != 0:
+                return RuleResult(
+                    rule_name=self.rule_name,
+                    severity=AuditSeverity.APPROVED,
+                    message="Repository has no commits yet; commit convention check skipped.",
+                )
+
+            log_res = subprocess.run(
+                ["git", "log", "-1", "--pretty=%B"],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if log_res.returncode != 0:
+                return RuleResult(
+                    rule_name=self.rule_name,
+                    severity=AuditSeverity.CHANGES_REQUIRED,
+                    message=f"Failed to read git commit log: {log_res.stderr.strip()}",
+                )
+
+            commit_msg = log_res.stdout
+            validation = parse_conventional_commit(commit_msg)
+            if not validation.is_valid:
+                return RuleResult(
+                    rule_name=self.rule_name,
+                    severity=AuditSeverity.CHANGES_REQUIRED,
+                    message=f"Latest commit (HEAD) violates Conventional Commits: {'; '.join(validation.errors)}",
+                    details={"errors": validation.errors, "raw_message": commit_msg.strip()},
+                )
+
+            header = validation.commit.header if validation.commit else "HEAD"
+            return RuleResult(
+                rule_name=self.rule_name,
+                severity=AuditSeverity.APPROVED,
+                message=f"Latest commit conforms to Conventional Commits: '{header}'.",
+                details={"header": header, "type": validation.commit.type if validation.commit else ""},
+            )
+        except Exception as e:
+            return RuleResult(
+                rule_name=self.rule_name,
+                severity=AuditSeverity.CHANGES_REQUIRED,
+                message=f"Failed to evaluate commit conventions: {e}",
+            )
+
+
 class ScopeAuditor:
     """Orchestrates rule evaluation and resolves final audit verdict."""
 
@@ -244,6 +305,7 @@ class ScopeAuditor:
             TaskContractRule(),
             SyntaxCompilationRule(),
             SecretsBoundaryRule(),
+            CommitConventionRule(),
         ]
 
     def run(self, repo_path: Path) -> AuditVerdict:

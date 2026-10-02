@@ -16,6 +16,7 @@ Commands:
                              2: [REJECTED] - Critical failure; escalates to Planner/human.
   taskctl done [msg] [-p]  Validate DoD, create double atomic commit (code + governance),
                            and dispatch webhook notifications.
+  taskctl lint-commit [msg] [--file <path>]  Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
@@ -36,6 +37,7 @@ from typing import Optional, List, Dict, Any
 
 from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md
 from taskctl.core.auditor import ScopeAuditor, AuditSeverity
+from taskctl.core.commits import parse_conventional_commit
 from taskctl.providers.multigravity import get_profile_quotas, route_target
 from taskctl.providers.maestri import (
     resolve_maestri_cli,
@@ -339,6 +341,70 @@ def cmd_audit() -> int:
     )
     return verdict.exit_code
 
+def cmd_lint_commit(msg: Optional[str] = None, file_path: Optional[str] = None) -> int:
+    raw_content = ""
+    if file_path:
+        if not os.path.exists(file_path):
+            print(f"[ERROR] Commit message file not found: {file_path}")
+            return 1
+        with open(file_path, "r", encoding="utf-8") as f:
+            raw_content = f.read()
+    elif msg:
+        raw_content = msg
+    elif not sys.stdin.isatty():
+        raw_content = sys.stdin.read()
+    else:
+        print("[ERROR] No commit message provided. Usage: taskctl lint-commit '<message>' or taskctl lint-commit --file <file>")
+        return 1
+
+    validation = parse_conventional_commit(raw_content)
+
+    print("\n" + "="*58)
+    print(" 📝 CONVENTIONAL COMMITS LINTER")
+    print("="*58)
+
+    if validation.is_valid and validation.commit:
+        c = validation.commit
+        scope_str = f"({c.scope})" if c.scope else ""
+        break_str = " [BREAKING]" if c.is_breaking else ""
+        print(f" ✅ [PASS] Valid Conventional Commit")
+        print(f" Type        : {c.type}")
+        print(f" Scope       : {c.scope or 'none'}")
+        print(f" Breaking    : {'YES' if c.is_breaking else 'no'}")
+        print(f" Description : {c.description}")
+        if c.body:
+            print(f" Body        :\n{c.body}")
+        if c.footers:
+            print(" Footers     :")
+            for f in c.footers:
+                print(f"   {f['token']}: {f['value']}")
+        print("="*58 + "\n")
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="commit_lint",
+            task_id="AUDIT",
+            message=f"Commit message valid: {c.header}",
+            status="APPROVED",
+            level="info",
+            details={"type": c.type, "scope": c.scope, "is_breaking": c.is_breaking},
+        )
+        return 0
+    else:
+        print(" ❌ [FAIL] Commit message violates Conventional Commits:")
+        for err in validation.errors:
+            print(f"   - {err}")
+        print("\n Schema Requirement: <type>[optional scope][!]: <description>")
+        print(" Standard Types     : feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert")
+        print("="*58 + "\n")
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="commit_lint",
+            task_id="AUDIT",
+            message=f"Commit message lint failed: {len(validation.errors)} error(s)",
+            status="CHANGES REQUIRED",
+            level="warn",
+            details={"errors": validation.errors},
+        )
+        return 1
+
 def cmd_done(custom_msg: Optional[str] = None, promote: bool = False, weight: str = "medium", notify_planner: bool = True):
     task_file = get_task_file()
     with open(task_file, "r", encoding="utf-8") as f:
@@ -355,6 +421,17 @@ def cmd_done(custom_msg: Optional[str] = None, promote: bool = False, weight: st
     commit_hash = "HEAD"
     if staged:
         commit_msg = custom_msg or f"feat(task): resolve [{task_id}] {title}"
+        val = parse_conventional_commit(commit_msg)
+        if not val.is_valid:
+            print("\n" + "="*58)
+            print(" ❌ [ERROR] Commit message violates Conventional Commits:")
+            for err in val.errors:
+                print(f"   - {err}")
+            print("\n Schema Requirement: <type>[optional scope][!]: <description>")
+            print(" Standard Types     : feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert")
+            print("="*58)
+            print("Aborting commit. Please supply a valid Conventional Commit message.\n")
+            return
         run_cmd(f'git commit -m "{commit_msg}"', check=True)
         commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
         print(f"[COMMIT 1/2] Feature commit created: {commit_hash} - {commit_msg}")
@@ -486,6 +563,20 @@ def main():
             details={"summary": msg},
         )
         print("[OK] Notification sent." if ok else "[ERROR] Notification failed.")
+    elif cmd in ["lint-commit", "commit-lint"]:
+        file_path = None
+        msg_parts = []
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-f", "--file"] and i + 1 < len(args):
+                file_path = args[i + 1]
+                i += 2
+            else:
+                msg_parts.append(args[i])
+                i += 1
+        msg = " ".join(msg_parts) if msg_parts else None
+        sys.exit(cmd_lint_commit(msg=msg, file_path=file_path))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)
