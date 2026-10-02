@@ -12,6 +12,11 @@ from taskctl.core.commits import (
     parse_conventional_commit,
     STANDARD_TYPES,
 )
+from taskctl.core.graph import (
+    TaskNode,
+    TaskDependencyGraph,
+    CycleDetectedError,
+)
 from taskctl.core.auditor import (
     AuditSeverity,
     AuditVerdict,
@@ -35,6 +40,9 @@ __all__ = [
     "CommitValidationResult",
     "parse_conventional_commit",
     "STANDARD_TYPES",
+    "TaskNode",
+    "TaskDependencyGraph",
+    "CycleDetectedError",
     "AuditSeverity",
     "AuditVerdict",
     "RuleResult",

@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
 
-from taskctl.telemetry import get_telemetry_emitter
+from taskctl.telemetry.sink import get_telemetry_emitter
 
 MAESTRI_CLI_PATHS = [
     os.path.expanduser("~/.local/bin/maestri"),

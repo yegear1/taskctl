@@ -244,7 +244,7 @@ def render_dashboard(
 
     # --- CONTROLS / FOOTER ---
     lines.append(border_mid())
-    ctrls = "[r] Refresh   [t] Run Tests   [a] Scope Audit   [d] Split Diff   [q] Quit"
+    ctrls = "[r] Refresh   [t] Run Tests   [a] Scope Audit   [d] Split Diff   [v] View DAG   [q] Quit"
     if color:
         ctrls = f"{Ansi.BOLD}{Ansi.CYAN}{ctrls}{Ansi.RESET}"
     lines.append(box_line(ctrls))
@@ -432,9 +432,98 @@ def _render_split_dashboard(
 
     lines.append(f"├{'─' * (col1 + 2)}┴{'─' * (col2 + 2)}┤")
 
-    ctrls = "[r] Refresh  [t] Tests  [d] Toggle Split  [↑/↓/Wheel] Scroll  [q] Quit"
+    ctrls = "[r] Refresh  [t] Tests  [d] Toggle Split  [v] View DAG  [↑/↓/Wheel] Scroll  [q] Quit"
     if color:
         ctrls = f"{Ansi.BOLD}{Ansi.CYAN}{ctrls}{Ansi.RESET}"
     lines.append(f"│ {_truncate_pad(ctrls, width - 4)} │")
     lines.append(f"└{'─' * (width - 2)}┘")
+    return "\n".join(lines)
+
+
+def render_dag_view(
+    state: DashboardState,
+    use_color: Optional[bool] = None,
+    term_width: Optional[int] = None,
+    scroll_offset: int = 0,
+) -> str:
+    """Render full-screen terminal DAG view of task dependencies."""
+    color = _should_use_color(use_color)
+    term_cols = shutil.get_terminal_size((80, 24)).columns
+    width = term_width or max(60, min(term_cols, 140))
+
+    def box_line(content: str) -> str:
+        return f"│ {_truncate_pad(content, width - 4)} │"
+
+    def border_top() -> str:
+        return f"┌{'─' * (width - 2)}┐"
+
+    def border_mid() -> str:
+        return f"├{'─' * (width - 2)}┤"
+
+    def border_bottom() -> str:
+        return f"└{'─' * (width - 2)}┘"
+
+    lines: List[str] = []
+    lines.append(border_top())
+
+    title = "🕸️  TASKCTL DAG VISUALIZER • TASK DEPENDENCY GRAPH"
+    if color:
+        title = f"{Ansi.BOLD}{Ansi.CYAN}{title}{Ansi.RESET}"
+    lines.append(box_line(title))
+
+    repo_name = os.path.basename(state.repo_root) or "repository"
+    meta = f"Repo: {repo_name} │ Branch: {state.branch} [{state.head_commit}] │ Mode: DAG Visualizer"
+    if color:
+        meta = f"{Ansi.DIM}{meta}{Ansi.RESET}"
+    lines.append(box_line(meta))
+
+    lines.append(border_mid())
+
+    # Summary
+    graph = getattr(state, "task_graph", None)
+    if graph is not None:
+        total = len(graph.nodes)
+        completed = sum(1 for n in graph.nodes.values() if n.is_done)
+        active = sum(1 for n in graph.nodes.values() if n.is_active)
+        backlog = sum(1 for n in graph.nodes.values() if n.section == "backlog")
+        has_cycles = graph.has_cycle()
+        cycle_status = f"{Ansi.RED}CYCLE DETECTED{Ansi.RESET}" if (has_cycles and color) else ("CYCLE DETECTED" if has_cycles else "Clean (No Cycles)")
+        summary_text = f"Tasks: {total} │ Completed: {completed} │ Active: {active} │ Backlog: {backlog} │ Cycle: {cycle_status}"
+    else:
+        summary_text = "Task graph not initialized."
+    if color:
+        summary_text = f"{Ansi.BOLD}{summary_text}{Ansi.RESET}"
+    lines.append(box_line(summary_text))
+    lines.append(border_mid())
+
+    # ASCII Tree content
+    if graph is not None:
+        raw_tree = graph.render_ascii_tree(show_status=True, use_color=color)
+    else:
+        raw_tree = getattr(state, "graph_ascii", "No graph available.")
+
+    tree_lines = raw_tree.splitlines() if raw_tree else ["(Empty task graph)"]
+
+    visible_height = max(10, shutil.get_terminal_size((80, 24)).lines - 8)
+    total_tree_rows = len(tree_lines)
+    max_offset = max(0, total_tree_rows - visible_height)
+    offset = max(0, min(scroll_offset, max_offset))
+    slice_lines = tree_lines[offset : offset + visible_height]
+
+    for tl in slice_lines:
+        lines.append(box_line(tl))
+
+    if total_tree_rows > visible_height:
+        scroll_info = f"▲ {offset} above │ {total_tree_rows - (offset + len(slice_lines))} below ▼ (j/k/Wheel)"
+        if color:
+            scroll_info = f"{Ansi.DIM}{scroll_info}{Ansi.RESET}"
+        lines.append(box_line(scroll_info))
+
+    lines.append(border_mid())
+    ctrls = "[r] Refresh   [v] Return to Dashboard   [↑/↓/Wheel] Scroll   [q] Quit"
+    if color:
+        ctrls = f"{Ansi.BOLD}{Ansi.CYAN}{ctrls}{Ansi.RESET}"
+    lines.append(box_line(ctrls))
+    lines.append(border_bottom())
+
     return "\n".join(lines)

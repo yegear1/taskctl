@@ -16,13 +16,28 @@ def find_repo_root(start_dir: Optional[str] = None) -> str:
     return os.path.abspath(start_dir) if start_dir else os.getcwd()
 
 def get_task_file(root_or_path: Optional[str] = None) -> str:
-    if root_or_path and os.path.isfile(root_or_path) and os.path.basename(root_or_path) == "TASK.md":
+    if root_or_path and os.path.isfile(root_or_path):
         return root_or_path
     root = find_repo_root(root_or_path) if root_or_path else find_repo_root()
     path = os.path.join(root, ".agent", "TASK.md")
     if not os.path.exists(path):
         raise FileNotFoundError(f".agent/TASK.md not found in repository root: {root}")
     return path
+
+def extract_dependencies(text: str) -> List[str]:
+    """Extract list of task IDs referenced as dependencies from a string."""
+    if not text:
+        return []
+    annotated = re.search(r"\((?:deps|depends|depends on|after):\s*([^\)]+)\)", text, re.IGNORECASE)
+    target = annotated.group(1) if annotated else text
+    raw_ids = re.findall(r"\[?(\d{2}\.\d+(?:\.\d+)?)\]?", target)
+    seen = set()
+    deps = []
+    for item in raw_ids:
+        if item not in seen:
+            seen.add(item)
+            deps.append(item)
+    return deps
 
 def parse_task_md(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Parse active task and backlog items from .agent/TASK.md."""
@@ -44,6 +59,9 @@ def parse_task_md(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         status_match = re.search(r"-\s*\*\*Status:\*\*\s*([^\n]+)", content)
         active_task["status"] = status_match.group(1).strip() if status_match else "UNKNOWN"
 
+        deps_match = re.search(r"-\s*\*\*(?:Depends On|Dependencies):\*\*\s*([^\n]+)", content, re.IGNORECASE)
+        active_task["dependencies"] = extract_dependencies(deps_match.group(1)) if deps_match else []
+
         crit_sec = re.search(r"### Acceptance Criteria[^\n]*\n(.*?)(?=\n---|\n## Completed Tasks Log|\n## Backlog|$)", content, re.DOTALL)
         criteria: List[Dict[str, Any]] = []
         if crit_sec:
@@ -57,12 +75,16 @@ def parse_task_md(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     backlog_sec = re.search(r"## Backlog[^\n]*\n(.*?)(?=\n---|\n## Completed Tasks Log|\n## Release|$)", content, re.DOTALL)
     if backlog_sec:
         for line in backlog_sec.group(1).strip().split("\n"):
-            m = re.match(r"^-\s*\[([ xX])\]\s*\*\*\[([^\]]+)\]\*\*\s*(.*)", line.strip())
+            m = re.match(r"^-\s*\[([ xX])\]\s*(?:\*\*|`)?\[([^\]]+)\](?:\*\*|`)?\s*(.*)", line.strip())
             if m:
+                raw_title = m.group(3).strip()
+                deps = extract_dependencies(raw_title)
+                clean_title = re.sub(r"\s*\((?:deps|depends|depends on|after):\s*[^\)]+\)", "", raw_title, flags=re.IGNORECASE).strip()
                 backlog.append({
                     "checked": m.group(1).lower() == "x",
                     "id": m.group(2).strip(),
-                    "title": m.group(3).strip()
+                    "title": clean_title,
+                    "dependencies": deps,
                 })
 
     return active_task, backlog
@@ -81,13 +103,16 @@ def parse_completed_tasks(content: str) -> List[Dict[str, Any]]:
         parts = [p.strip() for p in line.split("|")[1:-1]]
         if len(parts) >= 2:
             task_id = re.sub(r"[\[\]]", "", parts[0]).strip()
-            title = parts[1].strip()
+            raw_title = parts[1].strip()
+            deps = extract_dependencies(raw_title)
+            clean_title = re.sub(r"\s*\((?:deps|depends|depends on|after):\s*[^\)]+\)", "", raw_title, flags=re.IGNORECASE).strip()
             commits = parts[2].strip() if len(parts) > 2 else ""
             date = parts[3].strip() if len(parts) > 3 else ""
             completed.append({
                 "id": task_id,
-                "title": title,
+                "title": clean_title,
                 "commits": commits,
                 "date": date,
+                "dependencies": deps,
             })
     return completed

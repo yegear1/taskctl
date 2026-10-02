@@ -23,12 +23,14 @@ class Dashboard:
         run_tests: bool = False,
         use_color: Optional[bool] = None,
         split_pane: bool = False,
+        view_dag: bool = False,
     ):
         self.repo_root = repo_root
         self.interval = max(0.5, interval)
         self.run_tests = run_tests
         self.use_color = use_color
         self.split_pane = split_pane
+        self.view_mode = "dag" if view_dag else "dashboard"
         self.scroll_offset = 0
         self._running = False
 
@@ -39,6 +41,13 @@ class Dashboard:
             run_tests=self.run_tests,
             run_audit=True,
         )
+        if self.view_mode == "dag":
+            from taskctl.tui.renderer import render_dag_view
+            return render_dag_view(
+                state,
+                use_color=self.use_color,
+                scroll_offset=self.scroll_offset,
+            )
         split = self.split_pane if split_pane is None else split_pane
         return render_dashboard(
             state,
@@ -124,6 +133,10 @@ class Dashboard:
             return "refresh"
         if seq in ("t", "T"):
             return "run_tests"
+        if seq in ("v", "V"):
+            self.view_mode = "dashboard" if self.view_mode == "dag" else "dag"
+            self.scroll_offset = 0
+            return "refresh"
         if seq == "g":
             self.scroll_offset = 0
             return "refresh"

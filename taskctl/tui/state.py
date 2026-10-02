@@ -48,6 +48,8 @@ class DashboardState:
     git_diff_raw: str = ""
     last_updated: float = field(default_factory=time.time)
     error_message: Optional[str] = None
+    task_graph: Optional[Any] = None
+    graph_ascii: str = ""
 
 
 def _check_python_syntax(repo_root: str) -> Tuple[bool, str, int]:
@@ -181,10 +183,12 @@ def collect_dashboard_state(
     )
     head_commit = commit_res.stdout.strip() or "unknown"
 
-    # Parse TASK.md
+    # Parse TASK.md & Graph
     active_task: Dict[str, Any] = {}
     criteria: List[Dict[str, Any]] = []
     error_msg: Optional[str] = None
+    task_graph: Optional[Any] = None
+    graph_ascii: str = ""
 
     try:
         task_file = get_task_file()
@@ -192,6 +196,12 @@ def collect_dashboard_state(
             content = f.read()
         active_task, _ = parse_task_md(content)
         criteria = active_task.get("criteria", [])
+        try:
+            from taskctl.core.graph import TaskDependencyGraph
+            task_graph = TaskDependencyGraph.build_from_content(content)
+            graph_ascii = task_graph.render_ascii_tree(show_status=True, use_color=False)
+        except Exception:
+            pass
     except Exception as e:
         error_msg = f"Failed to parse TASK.md: {e}"
 
@@ -285,4 +295,6 @@ def collect_dashboard_state(
         git_diff_raw=diff_raw,
         last_updated=time.time(),
         error_message=error_msg,
+        task_graph=task_graph,
+        graph_ascii=graph_ascii,
     )

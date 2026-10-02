@@ -27,7 +27,9 @@ Commands:
                            Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
-  taskctl dashboard [--snapshot] [--interval <sec>] [--tests] [--split]
+  taskctl graph [--tree] [--mermaid] [--json] [--check-cycles] [--file <path>]
+                           Visualize task dependency DAG (ASCII tree, Mermaid, JSON, cycle detector).
+  taskctl dashboard [--snapshot] [--interval <sec>] [--tests] [--split] [--dag]
                            Launch interactive terminal dashboard prototype displaying
                            active task contract status, DoD checklist, and scope audit.
                            (Alias: taskctl tui)
@@ -177,6 +179,9 @@ def cmd_status():
         print(f"Target       : {active_task.get('target', 'N/A')}")
         print(f"Systems      : {active_task.get('systems', 'N/A')}")
         print(f"Description  : {active_task.get('description', 'N/A')}")
+        if active_task.get("dependencies"):
+            deps_str = ", ".join(f"[{d}]" for d in active_task.get("dependencies"))
+            print(f"Dependencies : {deps_str}")
         print("\nCriteria:")
         for c in active_task.get("criteria", []):
             mark = "✔" if c["checked"] else " "
@@ -206,13 +211,72 @@ def cmd_status():
     print(f"Vector Sink  : {'Configured (' + v_sink.endpoint_url + ')' if v_sink.is_configured() else 'Not configured (set TASKCTL_VECTOR_URL or VECTOR_URL)'}")
     print("="*50 + "\n")
 
+def cmd_graph(
+    tree: bool = True,
+    mermaid: bool = False,
+    json_output: bool = False,
+    check_cycles: bool = False,
+    file_path: Optional[str] = None,
+    no_infer: bool = False,
+) -> int:
+    import json
+    from taskctl.core.graph import TaskDependencyGraph
+
+    try:
+        graph = TaskDependencyGraph.build_from_file(file_path, infer_sequential=not no_infer)
+    except Exception as e:
+        print(f"[ERROR] Failed to build task dependency graph: {e}")
+        return 1
+
+    cycles = graph.find_cycles()
+
+    if check_cycles:
+        if cycles:
+            print("\n==================================================")
+            print(" ❌ [FAIL] Task Dependency Cycles Detected:")
+            for c in cycles:
+                print("   - " + " -> ".join(f"[{x}]" for x in c))
+            print("==================================================\n")
+            return 1
+        else:
+            print(f"[OK] No dependency cycles detected. {len(graph.nodes)} task node(s) verified.")
+            return 0
+
+    if mermaid:
+        print(graph.render_mermaid())
+        return 0
+
+    if json_output:
+        print(json.dumps(graph.to_dict(), indent=2))
+        return 0
+
+    # Default ASCII Tree View
+    print("\n==================================================")
+    print(" 🕸️  TASK DEPENDENCY GRAPH")
+    print("==================================================")
+    total = len(graph.nodes)
+    completed = sum(1 for n in graph.nodes.values() if n.is_done)
+    active = sum(1 for n in graph.nodes.values() if n.is_active)
+    backlog = sum(1 for n in graph.nodes.values() if n.section == "backlog")
+    print(f"Total: {total} │ Completed: {completed} │ Active: {active} │ Backlog: {backlog}")
+
+    if cycles:
+        print("\n ⚠️  WARNING: Dependency cycles detected:")
+        for c in cycles:
+            print("    " + " -> ".join(f"[{x}]" for x in c))
+    print("--------------------------------------------------")
+    print(graph.render_ascii_tree(show_status=True, use_color=True))
+    print("==================================================\n")
+    return 0
+
 def cmd_dashboard(
     snapshot: bool = False,
     interval: float = 2.0,
     run_tests: bool = False,
     split: bool = False,
+    dag: bool = False,
 ) -> int:
-    dashboard = Dashboard(interval=interval, run_tests=run_tests, split_pane=split)
+    dashboard = Dashboard(interval=interval, run_tests=run_tests, split_pane=split, view_dag=dag)
     if snapshot:
         sys.stdout.write(dashboard.render_snapshot() + "\n")
         sys.stdout.flush()
@@ -279,7 +343,7 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
         count=1
     )
 
-    backlog_line_pat = rf"-\s*\[ \]\s*\*\*\[{re.escape(next_id)}\]\*\*\s*{re.escape(next_title)}\n?"
+    backlog_line_pat = rf"-\s*\[ \]\s*(?:\*\*|`)?\[{re.escape(next_id)}\](?:\*\*|`)?\s*[^\n]*\n?"
     updated = re.sub(backlog_line_pat, "", updated)
 
     with open(task_file, "w", encoding="utf-8") as f:
@@ -1048,11 +1112,50 @@ def main():
                 i += 1
         msg = " ".join(msg_parts) if msg_parts else None
         sys.exit(cmd_lint_commit(msg=msg, file_path=file_path, rev=rev, commit_range=commit_range))
+    elif cmd == "graph":
+        mermaid = False
+        json_output = False
+        check_cycles = False
+        no_infer = False
+        file_path = None
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-m", "--mermaid"]:
+                mermaid = True
+                i += 1
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["-c", "--check-cycles", "--cycles"]:
+                check_cycles = True
+                i += 1
+            elif args[i] in ["--no-infer", "--explicit-only"]:
+                no_infer = True
+                i += 1
+            elif args[i] in ["-f", "--file"] and i + 1 < len(args):
+                file_path = args[i + 1]
+                i += 2
+            elif args[i] in ["--tree", "-t"]:
+                i += 1
+            elif not args[i].startswith("-") and file_path is None:
+                file_path = args[i]
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_graph(
+            mermaid=mermaid,
+            json_output=json_output,
+            check_cycles=check_cycles,
+            file_path=file_path,
+            no_infer=no_infer,
+        ))
     elif cmd in ["dashboard", "tui"]:
         snapshot = False
         interval = 2.0
         run_tests = False
         split = False
+        dag = False
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -1074,9 +1177,12 @@ def main():
             elif args[i] in ["--no-split"]:
                 split = False
                 i += 1
+            elif args[i] in ["--dag", "-g"]:
+                dag = True
+                i += 1
             else:
                 i += 1
-        sys.exit(cmd_dashboard(snapshot=snapshot, interval=interval, run_tests=run_tests, split=split))
+        sys.exit(cmd_dashboard(snapshot=snapshot, interval=interval, run_tests=run_tests, split=split, dag=dag))
     elif cmd == "daemon":
         watch_paths: List[str] = []
         interval = 5.0

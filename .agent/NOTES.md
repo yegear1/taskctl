@@ -22,6 +22,7 @@
 | [ADR-003](adr/003-conventional-commits-policy.md) | Conventional Commits Policy Engine & Scope Auditor Integration | Approved | 2026-10-01 |
 | [ADR-004](adr/004-remote-agent-canvas-contract-integration.md) | Remote Agent Canvas Contract Engine Integration & Maestri IPC | Approved | 2026-10-01 |
 | [ADR-005](adr/005-cross-repo-telemetry-aggregation-daemon.md) | Cross-Repository Telemetry Aggregation Daemon & Status Broadcaster | Approved | 2026-10-02 |
+| [ADR-006](adr/006-task-dependency-graph-engine.md) | Task Dependency Graph Engine, Visualizers, and Cycle Detection Policy | Approved | 2026-10-02 |
 
 ---
 
@@ -57,6 +58,11 @@
 - **Decision:** Implement `CrossRepoAggregator`, `TelemetryBroadcaster`, and `TelemetryDaemon` in `taskctl.telemetry`, along with CLI commands `taskctl daemon` and `taskctl broadcast`.
 - **Consequences:** Hermetic, fail-safe polling and broadcasting of task lifecycle events and summaries to Vector, Canvas, and Webhooks.
 
+### 2026-10-02 Task Dependency Graph Engine & Cycle Detection
+- **Context:** Preventing execution deadlocks, cycle loops, and visualizing project progression across active, backlog, and completed tasks.
+- **Decision:** Implement `TaskDependencyGraph` in `taskctl.core.graph` supporting explicit markdown prerequisites (`- **Depends On:**`, `(deps: ...)`), implicit sequential fallback for epics/subtasks, cycle detection via DFS coloring, ASCII tree visualization, Mermaid generation, and interactive TUI DAG view (`taskctl graph`, `taskctl ui --dag`).
+- **Consequences:** 100% hermetic DAG validation and visualization with zero non-standard external dependencies.
+
 ---
 
 ## Active Contracts
@@ -66,6 +72,7 @@
 | `.agent/TASK.md` | `taskctl` / Agent | `taskctl.core.parser` | Markdown AST task schema |
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
+| `taskctl graph` | `taskctl` | CLI / CI / Markdown Docs | ASCII Tree, Mermaid `graph TD`, JSON, or Exit Code (`0: Clean`, `1: Cycle`) |
 | `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs NDJSON/JSON |

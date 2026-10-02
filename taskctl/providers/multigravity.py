@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import time
 from typing import Dict, Any, List, Optional, Tuple
 
-from taskctl.telemetry import get_telemetry_emitter
+from taskctl.telemetry.sink import get_telemetry_emitter
 
 MULTIGRAVITY_PROFILES = ["yegear", "luisfmb", "joaoww"]
 
