@@ -8,13 +8,19 @@ import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
+import time
 from typing import Dict, Any, List, Optional, Tuple
+
+from taskctl.telemetry import get_telemetry_emitter
 
 MULTIGRAVITY_PROFILES = ["yegear", "luisfmb", "joaoww"]
 
 def get_profile_quotas() -> Dict[str, Any]:
     if not shutil.which("multigravity"):
         return {}
+    start_time = time.perf_counter()
+    success = False
+    profiles: Dict[str, Any] = {}
     try:
         res = subprocess.run(
             ["multigravity", "quota", "--json"],
@@ -25,14 +31,23 @@ def get_profile_quotas() -> Dict[str, Any]:
         )
         if res.returncode == 0 and res.stdout:
             data = json.loads(res.stdout)
-            profiles: Dict[str, Any] = {}
             for item in data:
                 p_name = item.get("profile")
                 if p_name in MULTIGRAVITY_PROFILES:
                     profiles[p_name] = item
+            success = True
             return profiles
     except Exception:
         pass
+    finally:
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        get_telemetry_emitter().record_provider_call(
+            provider="multigravity",
+            operation="quota",
+            duration_ms=duration_ms,
+            success=success,
+            metadata={"profiles_found": len(profiles)},
+        )
     return {}
 
 def route_target(weight: str = "medium") -> Tuple[str, str, str]:

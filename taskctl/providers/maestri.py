@@ -5,7 +5,10 @@ import sys
 import glob
 import shutil
 import subprocess
+import time
 from typing import Optional, List, Dict, Any
+
+from taskctl.telemetry import get_telemetry_emitter
 
 MAESTRI_CLI_PATHS = [
     os.path.expanduser("~/.local/bin/maestri"),
@@ -47,8 +50,11 @@ def run_maestri_cli(args: List[str]) -> Optional[subprocess.CompletedProcess]:
     env = os.environ.copy()
     env["MAESTRI_SOCKET"] = sock
 
+    start_time = time.perf_counter()
+    success = False
+    returncode = -1
     try:
-        return subprocess.run(
+        res = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -57,9 +63,21 @@ def run_maestri_cli(args: List[str]) -> Optional[subprocess.CompletedProcess]:
             check=False,
             env=env,
         )
+        returncode = res.returncode
+        success = (res.returncode == 0)
+        return res
     except Exception as e:
         print(f"[Maestri CLI Error] {e}", file=sys.stderr)
         return None
+    finally:
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        get_telemetry_emitter().record_provider_call(
+            provider="maestri",
+            operation=" ".join(args),
+            duration_ms=duration_ms,
+            success=success,
+            metadata={"returncode": returncode},
+        )
 
 def sync_task_cockpit_note(task_content: str, note_title: str = "task-cockpit-agent-task-md") -> bool:
     res = run_maestri_cli(["note", "update", note_title, task_content])

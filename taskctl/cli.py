@@ -30,6 +30,7 @@ if __package__ is None or __package__ == "":
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -43,6 +44,7 @@ from taskctl.providers.maestri import (
     sync_task_cockpit_note,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
+from taskctl.telemetry import get_telemetry_emitter, TelemetryEvent
 
 def run_cmd(cmd_str: str, check: bool = False, capture: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -162,6 +164,9 @@ def cmd_status():
 
     webhook = WebhookDispatcher()
     print(f"Webhook      : {'Configured' if webhook.is_configured() else 'Not configured (set TASKCTL_WEBHOOK_URL)'}")
+
+    v_sink = get_telemetry_emitter().vector_sink
+    print(f"Vector Sink  : {'Configured (' + v_sink.endpoint_url + ')' if v_sink.is_configured() else 'Not configured (set TASKCTL_VECTOR_URL or VECTOR_URL)'}")
     print("="*50 + "\n")
 
 def cmd_quota():
@@ -244,6 +249,19 @@ def cmd_next(weight: str = "medium"):
         details={"actor": f"{best_profile} ({best_model})"}
     )
 
+    get_telemetry_emitter().emit_lifecycle_event(
+        event_type="task_started",
+        task_id=next_id,
+        message=f"Task [{next_id}] promoted to RUNNING: {next_title}",
+        status="RUNNING",
+        details={
+            "actor": f"{best_profile} ({best_model})",
+            "weight": weight,
+            "profile": best_profile,
+            "model": best_model,
+        },
+    )
+
 def cmd_audit() -> int:
     from pathlib import Path
     repo_path = Path(find_repo_root())
@@ -261,8 +279,10 @@ def cmd_audit() -> int:
     print(" 🛡️ SCOPE AUDITOR VERIFICATION")
     print("="*58)
 
+    start_audit = time.perf_counter()
     auditor = ScopeAuditor()
     verdict = auditor.run(repo_path)
+    audit_duration_ms = (time.perf_counter() - start_audit) * 1000.0
 
     for res in verdict.results:
         if res.severity == AuditSeverity.APPROVED:
@@ -283,6 +303,27 @@ def cmd_audit() -> int:
         task_id=active_task.get("id", "XX.Y"),
         title=active_task.get("title", "Ad-hoc task"),
         status=verdict.status,
+        details={
+            "exit_code": verdict.exit_code,
+            "rule_count": len(verdict.results),
+            "rules": [
+                {
+                    "rule": r.rule_name,
+                    "status": r.severity.label,
+                    "message": r.message,
+                }
+                for r in verdict.results
+            ],
+        },
+    )
+
+    get_telemetry_emitter().emit_lifecycle_event(
+        event_type="audit",
+        task_id=active_task.get("id", "XX.Y"),
+        message=f"Scope Auditor finished with verdict: [{verdict.status}] (exit code {verdict.exit_code}) in {audit_duration_ms:.2f}ms",
+        status=verdict.status,
+        duration_ms=audit_duration_ms,
+        level="info" if verdict.exit_code == 0 else "warn",
         details={
             "exit_code": verdict.exit_code,
             "rule_count": len(verdict.results),
@@ -361,6 +402,14 @@ def cmd_done(custom_msg: Optional[str] = None, promote: bool = False, weight: st
         details={"commit": commit_hash, "governance_commit": gov_hash}
     )
 
+    get_telemetry_emitter().emit_lifecycle_event(
+        event_type="task_completed",
+        task_id=task_id,
+        message=f"Task [{task_id}] marked DONE: {title}",
+        status="DONE",
+        details={"commit": commit_hash, "governance_commit": gov_hash},
+    )
+
     if promote:
         cmd_next(weight=weight)
 
@@ -428,6 +477,13 @@ def main():
             title=msg,
             status="INFO",
             details={"summary": msg}
+        )
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="notification",
+            task_id="MANUAL",
+            message=msg,
+            status="INFO",
+            details={"summary": msg},
         )
         print("[OK] Notification sent." if ok else "[ERROR] Notification failed.")
     else:
