@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [03.7]: Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer)
+### 📌 Task [04.1]: Cross-repo telemetry aggregation daemon and status broadcaster
 
-- **Description:** Enhance taskctl dashboard / tui with mouse scroll event handling and split-pane diff viewing for changed files.
-- **Systems Involved:** [taskctl/tui/dashboard.py, taskctl/tui/renderer.py]
+- **Description:** Implement daemon and CLI service for aggregating task lifecycle events across multiple local repository workspaces and broadcasting summaries to Vector/VictoriaLogs and agent canvas.
+- **Systems Involved:** [taskctl/telemetry/, taskctl/cli.py]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -19,9 +19,9 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Terminal dashboard supports mouse wheel / scroll events.
-- [ ] Split-pane view renders git diff of modified files alongside contract status.
-- [ ] Tests and Scope Auditor pass cleanly.
+- [ ] Daemon service aggregates events from configured repository paths.
+- [ ] Non-blocking dispatch to configured sinks and agent canvas.
+- [ ] Unit tests and Scope Auditor pass cleanly.
 
 ---
 
@@ -29,11 +29,12 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.7] | Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer) | [`eac2934`] | 2026-10-02 |
 | [03.6] | GitHub Actions pre-commit and Scope Auditor CI workflow | [`5b7605f`] | 2026-10-02 |
 | [03.5] | Interactive terminal dashboard prototype for active task and DoD checklist | [`e462d77`] | 2026-10-02 |
 | [03.4] | Autonomous agent lifecycle hand-offs on task start (cmd_next) and task completion (cmd_done) | [`e33c6f8`] | 2026-10-02 |
-| [03.3] | Hybrid Scope Auditor with canvas agent delegation fallback | [`e239433`] | 2026-10-02 |
 | [03.2] | Canvas topology presets & workspace generator integration in Maestri provider | [`86b86fe`] | 2026-10-02 |
+| [03.3] | Hybrid Scope Auditor with canvas agent delegation fallback | [`e239433`] | 2026-10-02 |
 | [03.1] | Contract engine integration with remote agent canvas | [`9a51fe2`] | 2026-10-02 |
 | [02.2] | Automated commit message Conventional Commits linter & policy | [`e3168c7`] | 2026-10-01 |
 | [00.0] | Initial scaffolding (ADD greenfield template) | [`1d74dac`] | 2026-10-01 |
@@ -57,7 +58,7 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-- [ ] Cross-repo telemetry aggregation daemon
+- [ ] Interactive task dependency graph visualizer
 
 ---
 
