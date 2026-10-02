@@ -3,7 +3,9 @@
 taskctl - Task Lifecycle, Contract Engine & Multi-Agent CLI.
 
 Commands:
-  taskctl ws [name]        Create and wire complete Maestri workspace for current repo.
+  taskctl ws [name] [--preset <name>] [--workers <n>]
+                           Create and wire Maestri workspace for current repo with
+                           optional multi-agent topology preset (trinity, swarm, audit).
   taskctl init             Initialize .agent/TASK.md and AGENTS.md in current repository.
   taskctl status           Show active task, criteria, git status, and quota route.
   taskctl quota            Display real-time Multigravity quota across all profiles.
@@ -48,6 +50,9 @@ from taskctl.providers.maestri import (
     send_canvas_notification,
     create_workspace_canvas,
     ask_agent,
+    list_topology_presets,
+    get_topology_preset,
+    apply_topology_to_canvas,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
 from taskctl.telemetry import get_telemetry_emitter, TelemetryEvent
@@ -509,38 +514,7 @@ def cmd_backlog():
         print(f"  [{mark}] [{item['id']}] {item['title']}")
     print("="*50 + "\n")
 
-def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
-        print(__doc__)
-        sys.exit(0)
-
-    cmd = sys.argv[1].lower()
-    if cmd == "init":
-        cmd_init()
-    elif cmd == "status":
-        cmd_status()
-    elif cmd == "backlog":
-        cmd_backlog()
-    elif cmd == "quota":
-        cmd_quota()
-    elif cmd == "next":
-        weight = "medium"
-        for arg in sys.argv[2:]:
-            if arg in ["light", "medium", "heavy"]:
-                weight = arg
-        cmd_next(weight=weight)
-    elif cmd == "audit":
-        sys.exit(cmd_audit())
-    elif cmd == "done":
-        promote = False
-        custom_msg = None
-        for arg in sys.argv[2:]:
-            if arg in ["-p", "--promote"]:
-                promote = True
-            elif not arg.startswith("-"):
-                custom_msg = arg
-        cmd_done(custom_msg=custom_msg, promote=promote)
-def cmd_ws(name: Optional[str] = None):
+def cmd_ws(name: Optional[str] = None, preset: Optional[str] = None, workers: int = 3):
     root = find_repo_root()
     ws_name = name or os.path.basename(root)
 
@@ -549,31 +523,70 @@ def cmd_ws(name: Optional[str] = None):
     print("="*58)
     print(f" Workspace Name : {ws_name}")
     print(f" Directory Root : {root}")
-
-    ok = create_workspace_canvas(name=ws_name, dir_path=root)
-    if ok:
-        print(f" ✅ [OK] Provisioned Maestri workspace '{ws_name}'.")
-    else:
-        print(" ⚠️  [WARN] Remote canvas workspace creation skipped or daemon unavailable.")
+    if preset:
+        print(f" Topology Preset: {preset}")
+        if preset.lower() == "swarm":
+            print(f" Worker Count   : {workers}")
 
     task_file = os.path.join(root, ".agent", "TASK.md")
+    task_content = ""
     if os.path.exists(task_file):
-        with open(task_file, "r", encoding="utf-8") as f:
-            content = f.read()
-        synced = sync_task_cockpit_note(content)
-        if synced:
-            print(" ✅ [OK] Initialized and synced cockpit note on canvas.")
+        try:
+            with open(task_file, "r", encoding="utf-8") as f:
+                task_content = f.read()
+        except Exception:
+            task_content = ""
+
+    if preset:
+        valid_presets = list_topology_presets()
+        if preset.lower() not in valid_presets:
+            print(f" ❌ [ERROR] Unknown topology preset '{preset}'. Valid presets: {', '.join(valid_presets)}")
+            print("="*58 + "\n")
+            return 1
+        topo = get_topology_preset(preset, workers=workers, task_content=task_content)
+        res = apply_topology_to_canvas(topo, dir_path=root, workspace_name=ws_name)
+        ok = res.get("success", False)
+        if ok:
+            print(f" ✅ [OK] Successfully provisioned canvas workspace with '{preset}' topology.")
+        elif res.get("degraded"):
+            print(" ⚠️  [WARN] Remote canvas workspace degraded (Maestri daemon or CLI unavailable).")
+            print(f"          Topology plan registered locally ({len(topo.agents)} agents, {len(topo.connections)} connections).")
         else:
-            print(" ⚠️  [WARN] Note sync skipped (Maestri CLI or socket not detected).")
+            print(f" ❌ [ERROR] Failed to apply topology preset '{preset}'.")
+
+        print("\n Topology Breakdown:")
+        print(f"   - Agents ({len(topo.agents)}): {', '.join(a.name for a in topo.agents)}")
+        print(f"   - Notes  ({len(topo.notes)}): {', '.join(n.name for n in topo.notes)}")
+        print(f"   - Ropes  ({len(topo.connections)}): {', '.join(f'{s} -> {d}' for s, d in topo.connections)}")
+    else:
+        ok = create_workspace_canvas(name=ws_name, dir_path=root)
+        if ok:
+            print(f" ✅ [OK] Provisioned Maestri workspace '{ws_name}'.")
+        else:
+            print(" ⚠️  [WARN] Remote canvas workspace creation skipped or daemon unavailable.")
+
+        if task_content:
+            synced = sync_task_cockpit_note(task_content)
+            if synced:
+                print(" ✅ [OK] Initialized and synced cockpit note on canvas.")
+            else:
+                print(" ⚠️  [WARN] Note sync skipped (Maestri CLI or socket not detected).")
 
     print("="*58 + "\n")
     get_telemetry_emitter().emit_lifecycle_event(
         event_type="workspace_provision",
         task_id="WORKSPACE",
-        message=f"Provisioned canvas workspace '{ws_name}' in {root}",
+        message=f"Provisioned canvas workspace '{ws_name}' in {root}" + (f" with preset '{preset}'" if preset else ""),
         status="APPROVED" if ok else "DEGRADED",
-        details={"workspace": ws_name, "root": root, "success": ok},
+        details={
+            "workspace": ws_name,
+            "root": root,
+            "preset": preset,
+            "workers": workers if preset and preset.lower() == "swarm" else None,
+            "success": ok,
+        },
     )
+    return 0 if ok else 1
 
 def cmd_plan(prompt: str):
     task_file = get_task_file()
@@ -718,8 +731,28 @@ def main():
     elif cmd == "quota":
         cmd_quota()
     elif cmd == "ws":
-        ws_name = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else None
-        cmd_ws(name=ws_name)
+        ws_name = None
+        preset = None
+        workers = 3
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--preset", "-p"] and i + 1 < len(args):
+                preset = args[i + 1]
+                i += 2
+            elif args[i] in ["--workers", "-w"] and i + 1 < len(args):
+                try:
+                    workers = int(args[i + 1])
+                except ValueError:
+                    print(f"[WARN] Invalid worker count '{args[i + 1]}', defaulting to 3.")
+                    workers = 3
+                i += 2
+            elif not args[i].startswith("-") and ws_name is None:
+                ws_name = args[i]
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_ws(name=ws_name, preset=preset, workers=workers))
     elif cmd == "plan":
         if len(sys.argv) < 3:
             print("[ERROR] Please provide a planning prompt: taskctl plan '<prompt>'")

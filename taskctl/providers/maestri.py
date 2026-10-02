@@ -9,6 +9,7 @@ import socket
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
 
 from taskctl.telemetry import get_telemetry_emitter
@@ -265,23 +266,374 @@ def send_canvas_notification(message: str) -> bool:
     return bool(res and res.returncode == 0)
 
 
-def create_workspace_canvas(name: str, dir_path: str, group: Optional[str] = None) -> bool:
-    """Provision a new workspace on the Maestri canvas rooted at dir_path."""
+@dataclass
+class CanvasAgent:
+    name: str
+    role: str
+    prompt: str = ""
+    connections: List[str] = field(default_factory=list)
+    x: int = 0
+    y: int = 0
+
+
+@dataclass
+class CanvasNote:
+    name: str
+    content: str = ""
+    connections: List[str] = field(default_factory=list)
+    x: int = 0
+    y: int = 0
+
+
+@dataclass
+class CanvasTopology:
+    name: str
+    preset: str
+    agents: List[CanvasAgent] = field(default_factory=list)
+    notes: List[CanvasNote] = field(default_factory=list)
+    connections: List[Tuple[str, str]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def list_topology_presets() -> List[str]:
+    """Return available multi-agent canvas topology presets."""
+    return ["trinity", "swarm", "audit"]
+
+
+def get_topology_preset(name: str, workers: int = 3, task_content: str = "") -> CanvasTopology:
+    """Generate a configured CanvasTopology preset.
+
+    Supported presets:
+      - 'trinity': Triad of Planner, Builder, and Auditor with interconnected verification ropes.
+      - 'swarm': Central SwarmLead coordinator wired to N parallel workers.
+      - 'audit': Specialized audit squad: ScopeAuditor, TestVerifier, and SecurityAuditor.
+    """
+    preset_lower = (name or "").strip().lower()
+    if preset_lower == "trinity":
+        agents = [
+            CanvasAgent(
+                name="Planner",
+                role="Planner",
+                prompt="Decompose active tasks into .agent/TASK.md, maintain roadmap invariants, and oversee task strategy.",
+                connections=["Builder", "Auditor"],
+                x=100,
+                y=100,
+            ),
+            CanvasAgent(
+                name="Builder",
+                role="Implementer",
+                prompt="Implement codebase changes adhering to strict typing, testability, and task acceptance criteria.",
+                connections=["Auditor"],
+                x=500,
+                y=100,
+            ),
+            CanvasAgent(
+                name="Auditor",
+                role="Scope Auditor",
+                prompt="Execute taskctl audit, verify Definition of Done (DoD), and enforce Conventional Commits policy.",
+                connections=[],
+                x=900,
+                y=100,
+            ),
+        ]
+        notes = [
+            CanvasNote(
+                name="task-cockpit-agent-task-md",
+                content=task_content,
+                connections=["Planner", "Builder", "Auditor"],
+                x=500,
+                y=-200,
+            )
+        ]
+        connections = [
+            ("Planner", "Builder"),
+            ("Builder", "Auditor"),
+            ("Planner", "Auditor"),
+            ("task-cockpit-agent-task-md", "Planner"),
+            ("task-cockpit-agent-task-md", "Builder"),
+            ("task-cockpit-agent-task-md", "Auditor"),
+        ]
+        return CanvasTopology(
+            name="Trinity Triad",
+            preset="trinity",
+            agents=agents,
+            notes=notes,
+            connections=connections,
+            metadata={"description": "Planner, Builder, and Auditor triad"},
+        )
+
+    elif preset_lower == "swarm":
+        count = max(1, workers)
+        worker_names = [f"Worker-{i+1}" for i in range(count)]
+        swarm_lead = CanvasAgent(
+            name="SwarmLead",
+            role="Coordinator",
+            prompt="Coordinate autonomous worker swarm, decompose workloads, and aggregate worker results.",
+            connections=list(worker_names),
+            x=500,
+            y=100,
+        )
+        agents = [swarm_lead]
+        for i in range(count):
+            agents.append(
+                CanvasAgent(
+                    name=f"Worker-{i+1}",
+                    role="Worker",
+                    prompt=f"Autonomous swarm worker #{i+1}. Execute assigned work slice and report status to SwarmLead.",
+                    connections=[],
+                    x=150 + i * 220,
+                    y=400,
+                )
+            )
+        notes = [
+            CanvasNote(
+                name="task-cockpit-agent-task-md",
+                content=task_content,
+                connections=["SwarmLead"],
+                x=500,
+                y=-200,
+            )
+        ]
+        connections = [
+            ("task-cockpit-agent-task-md", "SwarmLead"),
+        ]
+        for w in worker_names:
+            connections.append(("SwarmLead", w))
+
+        return CanvasTopology(
+            name=f"Swarm ({count} workers)",
+            preset="swarm",
+            agents=agents,
+            notes=notes,
+            connections=connections,
+            metadata={"workers": count, "description": f"Swarm coordinator with {count} parallel workers"},
+        )
+
+    elif preset_lower == "audit":
+        agents = [
+            CanvasAgent(
+                name="ScopeAuditor",
+                role="Scope Auditor",
+                prompt="Audit git diff, check modified paths against active task scope, and prevent regressions.",
+                connections=["TestVerifier"],
+                x=200,
+                y=100,
+            ),
+            CanvasAgent(
+                name="TestVerifier",
+                role="Test Verifier",
+                prompt="Execute automated unit/integration test suites and verify strict typing and clean diffs.",
+                connections=["SecurityAuditor"],
+                x=600,
+                y=100,
+            ),
+            CanvasAgent(
+                name="SecurityAuditor",
+                role="Security Auditor",
+                prompt="Inspect code for secrets leakage, webhook isolation, and non-blocking network boundaries.",
+                connections=[],
+                x=1000,
+                y=100,
+            ),
+        ]
+        notes = [
+            CanvasNote(
+                name="task-cockpit-agent-task-md",
+                content=task_content,
+                connections=["ScopeAuditor", "TestVerifier", "SecurityAuditor"],
+                x=600,
+                y=-200,
+            )
+        ]
+        connections = [
+            ("ScopeAuditor", "TestVerifier"),
+            ("TestVerifier", "SecurityAuditor"),
+            ("task-cockpit-agent-task-md", "ScopeAuditor"),
+            ("task-cockpit-agent-task-md", "TestVerifier"),
+            ("task-cockpit-agent-task-md", "SecurityAuditor"),
+        ]
+        return CanvasTopology(
+            name="Audit & Governance Squad",
+            preset="audit",
+            agents=agents,
+            notes=notes,
+            connections=connections,
+            metadata={"description": "Triad of ScopeAuditor, TestVerifier, and SecurityAuditor"},
+        )
+
+    else:
+        valid = ", ".join(list_topology_presets())
+        raise ValueError(f"Unknown topology preset '{name}'. Valid presets: {valid}")
+
+
+def apply_topology_to_canvas(
+    topology: CanvasTopology,
+    dir_path: str,
+    workspace_name: str,
+    group: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Deploy and wire a CanvasTopology preset onto the Maestri spatial canvas.
+
+    Creates the workspace, recruits configured agents, creates context notes,
+    and establishes connection ropes between components.
+    Gracefully degrades if Maestri IPC socket and CLI are not available.
+    """
+    start_time = time.perf_counter()
     ipc = MaestriIPCClient()
+    ipc_avail = ipc.is_available()
+    cli_path = resolve_maestri_cli()
+    cli_avail = bool(cli_path and os.path.exists(cli_path))
+
+    agents_created: List[str] = []
+    notes_created: List[str] = []
+    connections_created: List[Tuple[str, str]] = []
+
+    if not ipc_avail and not cli_avail:
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        get_telemetry_emitter().record_provider_call(
+            provider="maestri",
+            operation=f"apply_topology:{topology.preset}",
+            duration_ms=duration_ms,
+            success=False,
+            metadata={"degraded": True, "reason": "No IPC or CLI available"},
+        )
+        return {
+            "success": False,
+            "preset": topology.preset,
+            "workspace": workspace_name,
+            "agents_created": [],
+            "notes_created": [],
+            "connections_created": [],
+            "degraded": True,
+            "error": "Maestri IPC socket and CLI unavailable",
+        }
+
+    ws_ok = create_workspace_canvas(name=workspace_name, dir_path=dir_path, group=group)
+
+    # 1. Notes
+    for note in topology.notes:
+        content = note.content
+        if not content and note.name == "task-cockpit-agent-task-md":
+            task_file = os.path.join(dir_path, ".agent", "TASK.md")
+            if os.path.exists(task_file):
+                try:
+                    with open(task_file, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except Exception:
+                    content = ""
+        ok = sync_task_cockpit_note(content, note_title=note.name)
+        if ok:
+            notes_created.append(note.name)
+
+    # 2. Agents
+    for agent in topology.agents:
+        agent_ok = False
+        if ipc_avail:
+            if agent.prompt:
+                ipc.send_request("role_create", {"name": agent.role, "prompt": agent.prompt})
+            resp = ipc.send_request(
+                "recruit",
+                {
+                    "name": agent.name,
+                    "role": agent.role,
+                    "dir": dir_path,
+                    "workspace": workspace_name,
+                    "x": agent.x,
+                    "y": agent.y,
+                },
+            )
+            if resp and resp.get("result"):
+                agent_ok = True
+        if not agent_ok and cli_avail:
+            if agent.prompt:
+                run_maestri_cli(["role", "create", agent.role, agent.prompt])
+            res_rec = run_maestri_cli(
+                ["recruit", agent.name, "--role", agent.role, "--dir", dir_path]
+            )
+            if res_rec and res_rec.returncode == 0:
+                agent_ok = True
+        if agent_ok:
+            agents_created.append(agent.name)
+
+    # 3. Connections
+    for src, dst in topology.connections:
+        conn_ok = False
+        if ipc_avail:
+            resp = ipc.send_request("connect", {"from": src, "to": dst})
+            if resp and resp.get("result"):
+                conn_ok = True
+        if not conn_ok and cli_avail:
+            res_conn = run_maestri_cli(["connect", src, dst])
+            if res_conn and res_conn.returncode == 0:
+                conn_ok = True
+        if conn_ok:
+            connections_created.append((src, dst))
+
+    duration_ms = (time.perf_counter() - start_time) * 1000.0
+    overall_success = ws_ok and (bool(agents_created) or not topology.agents)
+    get_telemetry_emitter().record_provider_call(
+        provider="maestri",
+        operation=f"apply_topology:{topology.preset}",
+        duration_ms=duration_ms,
+        success=overall_success,
+        metadata={
+            "workspace": workspace_name,
+            "preset": topology.preset,
+            "agents_created": len(agents_created),
+            "notes_created": len(notes_created),
+            "connections_created": len(connections_created),
+        },
+    )
+
+    return {
+        "success": overall_success,
+        "preset": topology.preset,
+        "workspace": workspace_name,
+        "agents_created": agents_created,
+        "notes_created": notes_created,
+        "connections_created": connections_created,
+        "degraded": not overall_success,
+    }
+
+
+def create_workspace_canvas(
+    name: str,
+    dir_path: str,
+    group: Optional[str] = None,
+    preset: Optional[str] = None,
+    workers: int = 3,
+) -> bool:
+    """Provision a new workspace on the Maestri canvas rooted at dir_path.
+
+    If preset is specified, automatically generates and applies the topology.
+    """
+    ipc = MaestriIPCClient()
+    ws_created = False
     if ipc.is_available():
         params: Dict[str, Any] = {"name": name, "dir": dir_path}
         if group:
             params["group"] = group
         resp = ipc.send_request("workspace_create", params)
         if resp and resp.get("result"):
-            return True
+            ws_created = True
 
-    args = ["workspace", "create", name, "--dir", dir_path]
-    if group:
-        args.extend(["--group", group])
+    if not ws_created:
+        args = ["workspace", "create", name, "--dir", dir_path]
+        if group:
+            args.extend(["--group", group])
 
-    res = run_maestri_cli(args)
-    return bool(res and res.returncode == 0)
+        res = run_maestri_cli(args)
+        ws_created = bool(res and res.returncode == 0)
+
+    if preset:
+        try:
+            topo = get_topology_preset(preset, workers=workers)
+            res_topo = apply_topology_to_canvas(topo, dir_path=dir_path, workspace_name=name, group=group)
+            return bool(ws_created or res_topo.get("success"))
+        except Exception:
+            return ws_created
+
+    return ws_created
 
 
 def ask_agent(agent_name: str, prompt: str, timeout: int = 60) -> Optional[str]:
