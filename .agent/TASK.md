@@ -7,21 +7,19 @@
 
 ## Active Task
 
-### 📌 Task [04.1]: Cross-repo telemetry aggregation daemon and status broadcaster
+### 📌 Task [XX.Y]: [Short descriptive title]
 
-- **Description:** Implement daemon and CLI service for aggregating task lifecycle events across multiple local repository workspaces and broadcasting summaries to Vector/VictoriaLogs and agent canvas.
-- **Systems Involved:** [taskctl/telemetry/, taskctl/cli.py]
+- **Description:** [Awaiting next planned task]
+- **Systems Involved:** []
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
-  - [x] Source code changes
+  - [ ] Source code changes
 - **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Daemon service aggregates events from configured repository paths.
-- [ ] Non-blocking dispatch to configured sinks and agent canvas.
-- [ ] Unit tests and Scope Auditor pass cleanly.
+- [ ] [Awaiting next planned task criteria]
 
 ---
 
@@ -29,6 +27,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [04.1] | Cross-repo telemetry aggregation daemon and status broadcaster | [`c41588f`] | 2026-10-02 |
 | [03.7] | Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer) | [`eac2934`] | 2026-10-02 |
 | [03.6] | GitHub Actions pre-commit and Scope Auditor CI workflow | [`5b7605f`] | 2026-10-02 |
 | [03.5] | Interactive terminal dashboard prototype for active task and DoD checklist | [`e462d77`] | 2026-10-02 |
