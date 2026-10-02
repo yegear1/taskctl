@@ -104,6 +104,7 @@ class TestTuiState(unittest.TestCase):
                 MagicMock(returncode=0, stdout="a1b2c3d\n"),
                 MagicMock(returncode=0, stdout=""),
                 MagicMock(returncode=0, stdout=""),
+                MagicMock(returncode=0, stdout="+mock diff line\n"),
             ]
             with patch("taskctl.tui.state.get_task_file", return_value=str(task_md)):
                 state = collect_dashboard_state(repo_root=self.test_dir, run_tests=False, run_audit=False)
@@ -114,6 +115,17 @@ class TestTuiState(unittest.TestCase):
                 self.assertEqual(len(state.acceptance_criteria), 2)
                 self.assertTrue(state.acceptance_criteria[0]["checked"])
                 self.assertFalse(state.acceptance_criteria[1]["checked"])
+                self.assertEqual(state.git_diff_lines, ["+mock diff line"])
+                self.assertEqual(state.git_diff_raw, "+mock diff line\n")
+
+    def test_get_git_diff_mocked(self):
+        from taskctl.tui.state import _get_git_diff
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="diff --git a/f.py b/f.py\n+x = 1\n")
+            lines, raw = _get_git_diff(self.test_dir)
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(lines[0], "diff --git a/f.py b/f.py")
+            self.assertIn("+x = 1", raw)
 
 
 class TestTuiRenderer(unittest.TestCase):
@@ -197,6 +209,86 @@ class TestTuiRenderer(unittest.TestCase):
         self.assertIn("file1.py", output)
         self.assertIn("file2.py", output)
 
+    def test_render_split_dashboard_clean(self):
+        state = DashboardState(
+            repo_root="/path/to/repo",
+            branch="main",
+            head_commit="abcdef1",
+            active_task={"id": "03.7", "title": "Diff Viewer", "status": "RUNNING"},
+            acceptance_criteria=[{"checked": True, "text": "Criterion A"}],
+            dod_items=[DoDCheckItem(name="Syntax Check", status="PASS", message="Clean")],
+            audit_verdict=None,
+            git_clean=True,
+            staged_count=0,
+            unstaged_count=0,
+            untracked_count=0,
+            git_status_preview=[],
+            git_diff_lines=[],
+        )
+        output = render_dashboard(state, width=90, use_color=False, split_pane=True)
+        self.assertIn("TASKCTL COCKPIT", output)
+        self.assertIn("ACTIVE TASK CONTRACT", output)
+        self.assertIn("GIT DIFF PREVIEW [Clean]", output)
+        self.assertIn("Working tree clean", output)
+
+    def test_render_split_dashboard_with_diff(self):
+        state = DashboardState(
+            repo_root="/path/to/repo",
+            branch="feature",
+            head_commit="1122334",
+            active_task={"id": "03.7", "title": "Diff Viewer", "status": "RUNNING"},
+            acceptance_criteria=[],
+            dod_items=[],
+            audit_verdict=None,
+            git_clean=False,
+            staged_count=1,
+            unstaged_count=0,
+            untracked_count=0,
+            git_status_preview=["M  main.py"],
+            git_diff_lines=[
+                "diff --git a/main.py b/main.py",
+                "index 111..222 100644",
+                "--- a/main.py",
+                "+++ b/main.py",
+                "@@ -1,3 +1,4 @@",
+                "+new line content",
+                "-old line content",
+                " context line",
+            ],
+        )
+        # Test colored output
+        out_col = render_dashboard(state, width=100, use_color=True, split_pane=True, diff_scroll_offset=0)
+        self.assertIn("GIT DIFF", out_col)
+        self.assertIn("new line content", out_col)
+        self.assertIn("Mode: Split Diff", out_col)
+
+        # Test plain output
+        out_plain = render_dashboard(state, width=100, use_color=False, split_pane=True, diff_scroll_offset=0)
+        self.assertIn("GIT DIFF [1-", out_plain)
+        self.assertIn("new line content", out_plain)
+
+    def test_render_split_dashboard_scrolling(self):
+        diff_lines = [f"+diff line {i}" for i in range(40)]
+        state = DashboardState(
+            repo_root="/path/to/repo",
+            branch="feature",
+            head_commit="1122334",
+            active_task={"id": "03.7", "title": "Diff Viewer", "status": "RUNNING"},
+            acceptance_criteria=[],
+            dod_items=[],
+            audit_verdict=None,
+            git_clean=False,
+            staged_count=1,
+            unstaged_count=0,
+            untracked_count=0,
+            git_status_preview=["M  large.py"],
+            git_diff_lines=diff_lines,
+        )
+        out = render_dashboard(state, width=100, use_color=False, split_pane=True, diff_scroll_offset=10)
+        self.assertIn("+diff line 10", out)
+        self.assertIn("above", out)
+        self.assertIn("below", out)
+
 
 class TestDashboardController(unittest.TestCase):
     @patch("taskctl.tui.dashboard.collect_dashboard_state")
@@ -230,8 +322,88 @@ class TestDashboardController(unittest.TestCase):
 
     def test_cmd_dashboard_snapshot(self):
         with patch("sys.stdout.write"):
-            code = cmd_dashboard(snapshot=True)
+            code = cmd_dashboard(snapshot=True, split=True)
             self.assertEqual(code, 0)
+
+    def test_handle_input_mouse_sgr(self):
+        dash = Dashboard()
+        dash.scroll_offset = 6
+
+        # SGR Wheel Up (button 64)
+        act_up = dash.handle_input("\x1b[<64;10;20M")
+        self.assertEqual(act_up, "refresh")
+        self.assertEqual(dash.scroll_offset, 3)
+
+        # SGR Wheel Down (button 65)
+        act_down = dash.handle_input("\x1b[<65;10;20M")
+        self.assertEqual(act_down, "refresh")
+        self.assertEqual(dash.scroll_offset, 6)
+
+        # Non-wheel mouse click ignored safely
+        act_click = dash.handle_input("\x1b[<0;10;20M")
+        self.assertIsNone(act_click)
+
+    def test_handle_input_mouse_legacy(self):
+        dash = Dashboard()
+        dash.scroll_offset = 5
+
+        # Legacy wheel up: 96
+        act_up = dash.handle_input("\x1b[M" + chr(96) + "xy")
+        self.assertEqual(act_up, "refresh")
+        self.assertEqual(dash.scroll_offset, 2)
+
+        # Legacy wheel down: 97
+        act_down = dash.handle_input("\x1b[M" + chr(97) + "xy")
+        self.assertEqual(act_down, "refresh")
+        self.assertEqual(dash.scroll_offset, 5)
+
+    def test_handle_input_keyboard_scroll_and_keys(self):
+        dash = Dashboard()
+        self.assertEqual(dash.scroll_offset, 0)
+
+        # j (scroll down 1)
+        dash.handle_input("j")
+        self.assertEqual(dash.scroll_offset, 1)
+
+        # Arrow Down
+        dash.handle_input("\x1b[B")
+        self.assertEqual(dash.scroll_offset, 2)
+
+        # k (scroll up 1)
+        dash.handle_input("k")
+        self.assertEqual(dash.scroll_offset, 1)
+
+        # Arrow Up
+        dash.handle_input("\x1b[A")
+        self.assertEqual(dash.scroll_offset, 0)
+
+        # Page Down
+        dash.handle_input("\x1b[6~")
+        self.assertEqual(dash.scroll_offset, 10)
+
+        # Page Up
+        dash.handle_input("\x1b[5~")
+        self.assertEqual(dash.scroll_offset, 0)
+
+        # End & Home
+        dash.handle_input("\x1b[F")
+        self.assertEqual(dash.scroll_offset, 999999)
+        dash.handle_input("\x1b[H")
+        self.assertEqual(dash.scroll_offset, 0)
+
+        # Toggle split pane
+        self.assertFalse(dash.split_pane)
+        dash.handle_input("d")
+        self.assertTrue(dash.split_pane)
+        dash.handle_input("\t")
+        self.assertFalse(dash.split_pane)
+
+        # Refresh and actions
+        self.assertEqual(dash.handle_input("r"), "refresh")
+        self.assertEqual(dash.handle_input("t"), "run_tests")
+        self.assertEqual(dash.handle_input("q"), "quit")
+        self.assertEqual(dash.handle_input("\x1b"), "quit")
+        self.assertEqual(dash.handle_input("\x03"), "quit")
 
     @patch("select.select")
     @patch("sys.stdin.read")

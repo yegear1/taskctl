@@ -44,6 +44,8 @@ class DashboardState:
     unstaged_count: int
     untracked_count: int
     git_status_preview: List[str]
+    git_diff_lines: List[str] = field(default_factory=list)
+    git_diff_raw: str = ""
     last_updated: float = field(default_factory=time.time)
     error_message: Optional[str] = None
 
@@ -113,6 +115,26 @@ def _check_git_workspace(repo_root: str) -> Tuple[bool, int, int, int, List[str]
     return is_clean, staged, unstaged, untracked, preview, diff_clean, diff_msg
 
 
+def _get_git_diff(repo_root: str) -> Tuple[List[str], str]:
+    """Capture current git diff (unstaged and staged changes)."""
+    res = subprocess.run(
+        ["git", "diff", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        res = subprocess.run(
+            ["git", "diff"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+    raw = res.stdout if res.returncode == 0 else ""
+    lines = raw.splitlines()
+    return lines, raw
+
+
 def _run_automated_tests(repo_root: str) -> Tuple[bool, str, float]:
     """Execute unittest discovery hermetically."""
     t0 = time.time()
@@ -173,8 +195,9 @@ def collect_dashboard_state(
     except Exception as e:
         error_msg = f"Failed to parse TASK.md: {e}"
 
-    # Git workspace
+    # Git workspace & diff
     git_clean, staged, unstaged, untracked, preview, diff_clean, diff_msg = _check_git_workspace(repo_root)
+    diff_lines, diff_raw = _get_git_diff(repo_root)
 
     # DoD Checklist items
     dod_items: List[DoDCheckItem] = []
@@ -258,6 +281,8 @@ def collect_dashboard_state(
         unstaged_count=unstaged,
         untracked_count=untracked,
         git_status_preview=preview,
+        git_diff_lines=diff_lines,
+        git_diff_raw=diff_raw,
         last_updated=time.time(),
         error_message=error_msg,
     )

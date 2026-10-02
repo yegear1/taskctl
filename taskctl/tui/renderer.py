@@ -106,15 +106,20 @@ def render_dashboard(
     state: DashboardState,
     width: Optional[int] = None,
     use_color: Optional[bool] = None,
+    split_pane: bool = False,
+    diff_scroll_offset: int = 0,
 ) -> str:
     """Render the dashboard state into a formatted terminal string."""
     color = _should_use_color(use_color)
 
     if width is None:
         term_cols = shutil.get_terminal_size((80, 24)).columns
-        width = max(70, min(100, term_cols))
+        width = max(70, min(120, term_cols))
     else:
         width = max(60, width)
+
+    if split_pane:
+        return _render_split_dashboard(state, width=width, color=color, diff_scroll_offset=diff_scroll_offset)
 
     inner_width = width - 4  # accounted for "│ " and " │"
 
@@ -239,10 +244,197 @@ def render_dashboard(
 
     # --- CONTROLS / FOOTER ---
     lines.append(border_mid())
-    ctrls = "[r] Refresh   [t] Run Tests   [a] Scope Audit   [q] Quit"
+    ctrls = "[r] Refresh   [t] Run Tests   [a] Scope Audit   [d] Split Diff   [q] Quit"
     if color:
         ctrls = f"{Ansi.BOLD}{Ansi.CYAN}{ctrls}{Ansi.RESET}"
     lines.append(box_line(ctrls))
     lines.append(border_bottom())
 
+    return "\n".join(lines)
+
+
+def _render_split_dashboard(
+    state: DashboardState,
+    width: int,
+    color: bool,
+    diff_scroll_offset: int = 0,
+) -> str:
+    """Render dual-column split dashboard: Contract Status on Left, Git Diff on Right."""
+    col1 = (width - 7) // 2
+    col2 = (width - 7) - col1
+
+    left_lines: List[str] = []
+
+    # Active Task Header
+    task_header = "📌 ACTIVE TASK CONTRACT"
+    if color:
+        task_header = f"{Ansi.BOLD}{Ansi.YELLOW}{task_header}{Ansi.RESET}"
+    left_lines.append(task_header)
+
+    task = state.active_task
+    if task:
+        task_id = task.get("id", "XX.Y")
+        task_title = task.get("title", "Ad-hoc task")
+        status_raw = task.get("status", "UNKNOWN")
+
+        badge = _status_badge(status_raw, use_color=color)
+        t_id_str = f"[{task_id}] {task_title}"
+        if color:
+            t_id_str = f"{Ansi.BOLD}{t_id_str}{Ansi.RESET}"
+        left_lines.append(f"Task  : {t_id_str}")
+        left_lines.append(f"Status: {badge}")
+
+        if task.get("target"):
+            left_lines.append(f"Target: {task['target']}")
+
+        criteria = state.acceptance_criteria
+        if criteria:
+            completed = sum(1 for c in criteria if c.get("checked"))
+            total = len(criteria)
+            crit_head = f"Criteria ({completed}/{total}):"
+            if color:
+                crit_head = f"{Ansi.BOLD}{crit_head}{Ansi.RESET}"
+            left_lines.append(crit_head)
+
+            for c in criteria:
+                is_done = c.get("checked", False)
+                text = c.get("text", "")
+                if is_done:
+                    marker = f"{Ansi.GREEN}[x]{Ansi.RESET}" if color else "[x]"
+                    c_text = f"{Ansi.DIM}{text}{Ansi.RESET}" if color else text
+                else:
+                    marker = f"{Ansi.YELLOW}[ ]{Ansi.RESET}" if color else "[ ]"
+                    c_text = text
+                left_lines.append(f" {marker} {c_text}")
+    else:
+        left_lines.append("No active task loaded.")
+
+    left_lines.append("─" * col1)
+
+    # DoD & Audit
+    header_dod = "📋 DEFINITION OF DONE & AUDIT"
+    if color:
+        header_dod = f"{Ansi.BOLD}{Ansi.GREEN}{header_dod}{Ansi.RESET}"
+    left_lines.append(header_dod)
+
+    for item in state.dod_items:
+        badge = _dod_badge(item.status, use_color=color)
+        name_str = f"{item.name:<18}"
+        if color:
+            name_str = f"{Ansi.BOLD}{name_str}{Ansi.RESET}"
+        left_lines.append(f" {badge} {name_str}")
+
+    left_lines.append("─" * col1)
+
+    # Workspace status
+    ws_status = "Clean" if state.git_clean else f"{state.staged_count}S, {state.unstaged_count}M, {state.untracked_count}U"
+    header_ws = f"📂 WORKSPACE: {ws_status}"
+    if color:
+        ws_col = Ansi.GREEN if state.git_clean else Ansi.YELLOW
+        header_ws = f"{Ansi.BOLD}{ws_col}{header_ws}{Ansi.RESET}"
+    left_lines.append(header_ws)
+
+    if not state.git_clean:
+        for p in state.git_status_preview[:3]:
+            code = p[:2]
+            fname = p[3:]
+            if color:
+                code_color = Ansi.GREEN if "A" in code or "M" in code[:1] else (Ansi.YELLOW if "M" in code[1:] else Ansi.RED)
+                left_lines.append(f"  {code_color}{code}{Ansi.RESET} {fname}")
+            else:
+                left_lines.append(f"  {code} {fname}")
+
+    # Right column (Diff viewer)
+    right_lines: List[str] = []
+    diff_lines = state.git_diff_lines
+    total_diff = len(diff_lines)
+
+    target_body_rows = max(len(left_lines), 14)
+    max_diff_rows = max(4, target_body_rows - 2)
+
+    if total_diff == 0:
+        diff_hdr = "📄 GIT DIFF PREVIEW [Clean]"
+        if color:
+            diff_hdr = f"{Ansi.BOLD}{Ansi.CYAN}{diff_hdr}{Ansi.RESET}"
+        right_lines.append(diff_hdr)
+        right_lines.append("")
+        msg_clean1 = "  Working tree clean."
+        msg_clean2 = "  Zero uncommitted changes to diff."
+        msg_clean3 = "  Edit files to see real-time diffs."
+        if color:
+            right_lines.append(f"{Ansi.DIM}{msg_clean1}{Ansi.RESET}")
+            right_lines.append(f"{Ansi.DIM}{msg_clean2}{Ansi.RESET}")
+            right_lines.append(f"{Ansi.DIM}{msg_clean3}{Ansi.RESET}")
+        else:
+            right_lines.append(msg_clean1)
+            right_lines.append(msg_clean2)
+            right_lines.append(msg_clean3)
+    else:
+        max_offset = max(0, total_diff - max_diff_rows)
+        offset = max(0, min(diff_scroll_offset, max_offset))
+        end_idx = min(offset + max_diff_rows, total_diff)
+        diff_hdr = f"📄 GIT DIFF [{offset + 1}-{end_idx}/{total_diff}]"
+        if color:
+            diff_hdr = f"{Ansi.BOLD}{Ansi.CYAN}{diff_hdr}{Ansi.RESET}"
+        right_lines.append(diff_hdr)
+
+        slice_lines = diff_lines[offset:end_idx]
+        for dl in slice_lines:
+            if not color:
+                right_lines.append(dl)
+            else:
+                if dl.startswith("diff --git"):
+                    right_lines.append(f"{Ansi.BOLD}{Ansi.YELLOW}{dl}{Ansi.RESET}")
+                elif dl.startswith("index ") or dl.startswith("---") or dl.startswith("+++"):
+                    right_lines.append(f"{Ansi.YELLOW}{dl}{Ansi.RESET}")
+                elif dl.startswith("@@"):
+                    right_lines.append(f"{Ansi.CYAN}{dl}{Ansi.RESET}")
+                elif dl.startswith("+"):
+                    right_lines.append(f"{Ansi.GREEN}{dl}{Ansi.RESET}")
+                elif dl.startswith("-"):
+                    right_lines.append(f"{Ansi.RED}{dl}{Ansi.RESET}")
+                else:
+                    right_lines.append(f"{Ansi.DIM}{dl}{Ansi.RESET}")
+
+        if total_diff > max_diff_rows:
+            above = offset
+            below = total_diff - end_idx
+            scroll_info = f"▲ {above} above │ {below} below ▼ (Wheel/j/k)"
+            if color:
+                scroll_info = f"{Ansi.DIM}{scroll_info}{Ansi.RESET}"
+            right_lines.append(scroll_info)
+
+    total_rows = max(len(left_lines), len(right_lines))
+    while len(left_lines) < total_rows:
+        left_lines.append("")
+    while len(right_lines) < total_rows:
+        right_lines.append("")
+
+    lines = []
+    lines.append(f"┌{'─' * (width - 2)}┐")
+    title_text = "⚡ TASKCTL COCKPIT • TASK LIFECYCLE & CONTRACT ENGINE"
+    if color:
+        title_text = f"{Ansi.BOLD}{Ansi.CYAN}{title_text}{Ansi.RESET}"
+    lines.append(f"│ {_truncate_pad(title_text, width - 4)} │")
+
+    repo_name = os.path.basename(state.repo_root) or "repository"
+    meta_line = f"Repo: {repo_name} │ Branch: {state.branch} [{state.head_commit}] │ Mode: Split Diff"
+    if color:
+        meta_line = f"{Ansi.DIM}{meta_line}{Ansi.RESET}"
+    lines.append(f"│ {_truncate_pad(meta_line, width - 4)} │")
+
+    lines.append(f"├{'─' * (col1 + 2)}┬{'─' * (col2 + 2)}┤")
+
+    for i in range(total_rows):
+        l_str = _truncate_pad(left_lines[i], col1)
+        r_str = _truncate_pad(right_lines[i], col2)
+        lines.append(f"│ {l_str} │ {r_str} │")
+
+    lines.append(f"├{'─' * (col1 + 2)}┴{'─' * (col2 + 2)}┤")
+
+    ctrls = "[r] Refresh  [t] Tests  [d] Toggle Split  [↑/↓/Wheel] Scroll  [q] Quit"
+    if color:
+        ctrls = f"{Ansi.BOLD}{Ansi.CYAN}{ctrls}{Ansi.RESET}"
+    lines.append(f"│ {_truncate_pad(ctrls, width - 4)} │")
+    lines.append(f"└{'─' * (width - 2)}┘")
     return "\n".join(lines)

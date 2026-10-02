@@ -27,7 +27,7 @@ Commands:
                            Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
-  taskctl dashboard [--snapshot] [--interval <sec>] [--tests]
+  taskctl dashboard [--snapshot] [--interval <sec>] [--tests] [--split]
                            Launch interactive terminal dashboard prototype displaying
                            active task contract status, DoD checklist, and scope audit.
                            (Alias: taskctl tui)
@@ -195,8 +195,13 @@ def cmd_status():
     print(f"Vector Sink  : {'Configured (' + v_sink.endpoint_url + ')' if v_sink.is_configured() else 'Not configured (set TASKCTL_VECTOR_URL or VECTOR_URL)'}")
     print("="*50 + "\n")
 
-def cmd_dashboard(snapshot: bool = False, interval: float = 2.0, run_tests: bool = False) -> int:
-    dashboard = Dashboard(interval=interval, run_tests=run_tests)
+def cmd_dashboard(
+    snapshot: bool = False,
+    interval: float = 2.0,
+    run_tests: bool = False,
+    split: bool = False,
+) -> int:
+    dashboard = Dashboard(interval=interval, run_tests=run_tests, split_pane=split)
     if snapshot:
         sys.stdout.write(dashboard.render_snapshot() + "\n")
         sys.stdout.flush()
@@ -984,6 +989,7 @@ def main():
         snapshot = False
         interval = 2.0
         run_tests = False
+        split = False
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -999,9 +1005,15 @@ def main():
             elif args[i] in ["--tests", "-t", "--heavy"]:
                 run_tests = True
                 i += 1
+            elif args[i] in ["--split", "-d"]:
+                split = True
+                i += 1
+            elif args[i] in ["--no-split"]:
+                split = False
+                i += 1
             else:
                 i += 1
-        sys.exit(cmd_dashboard(snapshot=snapshot, interval=interval, run_tests=run_tests))
+        sys.exit(cmd_dashboard(snapshot=snapshot, interval=interval, run_tests=run_tests, split=split))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)
