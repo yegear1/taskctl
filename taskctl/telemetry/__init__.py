@@ -11,8 +11,6 @@ from taskctl.telemetry.aggregator import (
     WorkspaceEvent,
     CrossRepoAggregator,
 )
-from taskctl.telemetry.broadcaster import TelemetryBroadcaster
-from taskctl.telemetry.daemon import TelemetryDaemon
 
 __all__ = [
     "TelemetryEvent",
@@ -25,4 +23,31 @@ __all__ = [
     "CrossRepoAggregator",
     "TelemetryBroadcaster",
     "TelemetryDaemon",
+    "TraceContext",
+    "Span",
+    "Tracer",
+    "get_tracer",
+    "DurationAnalyzer",
+    "TracingAlertPolicy",
 ]
+
+
+def __getattr__(name: str):
+    if name == "TelemetryBroadcaster":
+        from taskctl.telemetry.broadcaster import TelemetryBroadcaster
+        return TelemetryBroadcaster
+    if name == "TelemetryDaemon":
+        from taskctl.telemetry.daemon import TelemetryDaemon
+        return TelemetryDaemon
+    if name in (
+        "TraceContext",
+        "Span",
+        "Tracer",
+        "get_tracer",
+        "DurationAnalyzer",
+        "TracingAlertPolicy",
+    ):
+        from taskctl.telemetry import tracing
+        return getattr(tracing, name)
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+

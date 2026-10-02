@@ -82,7 +82,21 @@ class TelemetryEmitter:
             self.emit_ndjson_stdout = emit_ndjson_stdout
 
     def emit(self, event: TelemetryEvent) -> bool:
-        """Emit event to all active sinks."""
+        """Emit event to all active sinks, propagating active trace context if missing."""
+        if event.trace_id is None or event.span_id is None:
+            try:
+                from taskctl.telemetry.tracing import get_tracer
+                ctx = get_tracer().get_current_context()
+                if ctx:
+                    if event.trace_id is None:
+                        event.trace_id = ctx.trace_id
+                    if event.span_id is None:
+                        event.span_id = ctx.span_id
+                    if event.parent_span_id is None:
+                        event.parent_span_id = ctx.parent_span_id
+            except Exception:
+                pass
+
         if self.emit_ndjson_stdout:
             sys.stdout.write(event.to_ndjson() + "\n")
             sys.stdout.flush()
@@ -90,6 +104,34 @@ class TelemetryEmitter:
         if self.vector_sink.is_configured():
             return self.vector_sink.send_event(event)
         return True
+
+    def emit_span(self, span: Any) -> bool:
+        """Export a completed Span as a canonical TelemetryEvent."""
+        level = "info" if span.status == "OK" else "warn"
+        msg = f"Span [{span.name}] completed in {span.duration_ms:.2f}ms ({span.status})"
+        if span.status_message:
+            msg += f": {span.status_message}"
+
+        event = TelemetryEvent(
+            message=msg,
+            level=level,
+            duration_ms=span.duration_ms,
+            event_type="span",
+            task_id=str(span.tags.get("task_id", "") or "") or None,
+            trace_id=span.trace_id,
+            span_id=span.span_id,
+            parent_span_id=span.parent_span_id,
+            details={
+                "span_name": span.name,
+                "status": span.status,
+                "tags": span.tags,
+                "events": [
+                    {"name": e.name, "timestamp": e.timestamp, "attributes": e.attributes}
+                    for e in span.events
+                ],
+            },
+        )
+        return self.emit(event)
 
     def emit_lifecycle_event(
         self,
@@ -100,6 +142,9 @@ class TelemetryEmitter:
         duration_ms: Optional[float] = None,
         details: Optional[Dict[str, Any]] = None,
         level: str = "info",
+        trace_id: Optional[str] = None,
+        span_id: Optional[str] = None,
+        parent_span_id: Optional[str] = None,
     ) -> bool:
         """Helper to create and emit a lifecycle event."""
         event_details = dict(details or {})
@@ -112,6 +157,9 @@ class TelemetryEmitter:
             duration_ms=duration_ms,
             event_type=event_type,
             task_id=task_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            parent_span_id=parent_span_id,
             details=event_details,
         )
         return self.emit(event)

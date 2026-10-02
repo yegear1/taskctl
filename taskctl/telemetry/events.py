@@ -25,6 +25,8 @@ class TelemetryEvent:
     task_id: Optional[str] = None
     workspace: Optional[str] = None
     trace_id: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
     request_id: Optional[str] = None
     http_status: Optional[int] = None
     stack_trace: Optional[str] = None
@@ -55,6 +57,10 @@ class TelemetryEvent:
             payload["workspace"] = self.workspace
         if self.trace_id is not None:
             payload["trace_id"] = self.trace_id
+        if self.span_id is not None:
+            payload["span_id"] = self.span_id
+        if self.parent_span_id is not None:
+            payload["parent_span_id"] = self.parent_span_id
         if self.request_id is not None:
             payload["request_id"] = self.request_id
         if self.http_status is not None:
