@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [03.5]: Interactive terminal dashboard prototype for active task and DoD checklist
+### 📌 Task [03.6]: GitHub Actions pre-commit and Scope Auditor CI workflow
 
-- **Description:** Build an interactive terminal dashboard prototype displaying active task contract status, DoD checklist, and scope audit verdicts.
-- **Systems Involved:** [taskctl/cli.py, taskctl/tui/ or taskctl/core/, tests/]
+- **Description:** Implement GitHub Actions workflow to run hermetic unit tests, syntax checks, Conventional Commits linting, and Scope Auditor on pull requests and pushes.
+- **Systems Involved:** [.github/workflows/ci.yml, taskctl/cli.py]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -19,10 +19,9 @@
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Terminal UI dashboard renders active task metadata and criteria.
-- [ ] Shows real-time DoD checklist status and git workspace cleanliness.
-- [ ] Non-blocking execution with clean graceful terminal exit.
-- [ ] Unit tests cover dashboard state formatting and rendering components.
+- [ ] GitHub Actions workflow config triggers on push and pull_request to main.
+- [ ] Workflow executes py_compile, unittest discovery, git diff --check, and taskctl audit.
+- [ ] Zero failure tolerance on lint and commit conventions.
 
 ---
 
@@ -30,6 +29,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [03.5] | Interactive terminal dashboard prototype for active task and DoD checklist | [`e462d77`] | 2026-10-02 |
 | [03.4] | Autonomous agent lifecycle hand-offs on task start (cmd_next) and task completion (cmd_done) | [`e33c6f8`] | 2026-10-02 |
 | [03.3] | Hybrid Scope Auditor with canvas agent delegation fallback | [`e239433`] | 2026-10-02 |
 | [03.2] | Canvas topology presets & workspace generator integration in Maestri provider | [`86b86fe`] | 2026-10-02 |
@@ -56,8 +56,8 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-- [ ] Interactive terminal dashboard (`taskctl tui` / `rich` or `curses`) focused strictly on task lifecycle (active task, DoD checklist, and audit diffs) — leaving quota/profile views to [`multigravity-cli`](https://github.com/yegear1/multigravity-cli)
-- [ ] GitHub Actions pre-commit check workflow
+- [ ] Interactive terminal dashboard enhancements (mouse scroll support, split-pane diff viewer)
+- [ ] Cross-repo telemetry aggregation daemon
 
 ---
 
