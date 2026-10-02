@@ -20,6 +20,7 @@
 | [ADR-001](adr/001-modular-cli-architecture.md) | Modular CLI Architecture & Fail-Safe Webhook Dispatcher | Approved | 2026-10-01 |
 | [ADR-002](adr/002-vector-telemetry-sink.md) | VictoriaLogs & Vector Direct Sink Integration with Provider Telemetry | Approved | 2026-10-01 |
 | [ADR-003](adr/003-conventional-commits-policy.md) | Conventional Commits Policy Engine & Scope Auditor Integration | Approved | 2026-10-01 |
+| [ADR-004](adr/004-remote-agent-canvas-contract-integration.md) | Remote Agent Canvas Contract Engine Integration & Maestri IPC | Approved | 2026-10-01 |
 
 ---
 
@@ -45,6 +46,11 @@
 - **Decision:** Implement standard Conventional Commits 1.0.0 parser in `taskctl.core.commits`, wire `CommitConventionRule` into `ScopeAuditor`, add `taskctl lint-commit` CLI, and guard `taskctl done`.
 - **Consequences:** Hermetic commit validation with zero external dependencies; full support for Git `commit-msg` hooks.
 
+### 2026-10-01 Remote Agent Canvas Contract Engine Integration & Maestri IPC
+- **Context:** Enabling bidirectional sync between local repository task contracts and remote spatial agent canvas (Maestri).
+- **Decision:** Implement `MaestriIPCClient` using UNIX domain sockets with CLI fallback, supporting bidirectional note syncing (`taskctl sync [--push|--pull]`), remote canvas workspace provisioning (`taskctl ws`), agent planning delegation (`taskctl plan`), and fail-safe canvas notifications (`taskctl notify`).
+- **Consequences:** Real-time visibility and control across agent canvas with zero risk of developer blocking if Maestri is offline.
+
 ---
 
 ## Active Contracts
@@ -56,6 +62,7 @@
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs NDJSON/JSON |
+| `MaestriIPCClient` / CLI | `taskctl` | Maestri Spatial Canvas | JSON-RPC / CLI notes & workspace commands |
 
 ---
 

@@ -44,6 +44,10 @@ from taskctl.providers.maestri import (
     resolve_maestri_socket,
     run_maestri_cli,
     sync_task_cockpit_note,
+    pull_task_cockpit_note,
+    send_canvas_notification,
+    create_workspace_canvas,
+    ask_agent,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
 from taskctl.telemetry import get_telemetry_emitter, TelemetryEvent
@@ -536,33 +540,215 @@ def main():
             elif not arg.startswith("-"):
                 custom_msg = arg
         cmd_done(custom_msg=custom_msg, promote=promote)
-    elif cmd == "sync":
-        task_file = get_task_file()
+def cmd_ws(name: Optional[str] = None):
+    root = find_repo_root()
+    ws_name = name or os.path.basename(root)
+
+    print("\n" + "="*58)
+    print(" 🎨 MAESTRI CANVAS WORKSPACE PROVISIONING")
+    print("="*58)
+    print(f" Workspace Name : {ws_name}")
+    print(f" Directory Root : {root}")
+
+    ok = create_workspace_canvas(name=ws_name, dir_path=root)
+    if ok:
+        print(f" ✅ [OK] Provisioned Maestri workspace '{ws_name}'.")
+    else:
+        print(" ⚠️  [WARN] Remote canvas workspace creation skipped or daemon unavailable.")
+
+    task_file = os.path.join(root, ".agent", "TASK.md")
+    if os.path.exists(task_file):
         with open(task_file, "r", encoding="utf-8") as f:
             content = f.read()
-        sync_task_cockpit_note(content)
-        print("[OK] Real-time canvas sync completed.")
-    elif cmd == "notify":
-        msg = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Test notification"
-        webhook = WebhookDispatcher()
-        if not webhook.is_configured():
-            print("[WARN] Webhook URL not configured. Set TASKCTL_WEBHOOK_URL.")
-            sys.exit(1)
-        ok = webhook.send_event(
+        synced = sync_task_cockpit_note(content)
+        if synced:
+            print(" ✅ [OK] Initialized and synced cockpit note on canvas.")
+        else:
+            print(" ⚠️  [WARN] Note sync skipped (Maestri CLI or socket not detected).")
+
+    print("="*58 + "\n")
+    get_telemetry_emitter().emit_lifecycle_event(
+        event_type="workspace_provision",
+        task_id="WORKSPACE",
+        message=f"Provisioned canvas workspace '{ws_name}' in {root}",
+        status="APPROVED" if ok else "DEGRADED",
+        details={"workspace": ws_name, "root": root, "success": ok},
+    )
+
+def cmd_plan(prompt: str):
+    task_file = get_task_file()
+    with open(task_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    active, _ = parse_task_md(content)
+    task_id = active.get("id", "XX.Y") if active else "XX.Y"
+
+    print("\n" + "="*58)
+    print(" 🧭 TASK PLANNING & AGENT DELEGATION")
+    print("="*58)
+    print(f" Target Task  : [{task_id}]")
+    print(f" Prompt       : {prompt}")
+
+    updated = re.sub(
+        r"(-\s*\*\*Status:\*\*)[^\n]+",
+        r"\1 PLANNING",
+        content,
+        count=1
+    )
+
+    with open(task_file, "w", encoding="utf-8") as f:
+        f.write(updated)
+    print(" [OK] Updated active task status to PLANNING in .agent/TASK.md.")
+
+    planner_resp = ask_agent("Planner", prompt)
+    if planner_resp:
+        print("\n [Maestri Planner Agent Response]")
+        print("-" * 58)
+        print(planner_resp)
+        print("-" * 58)
+    else:
+        print(" [INFO] Maestri Planner agent offline or not connected; planning registered locally.")
+
+    sync_task_cockpit_note(updated)
+
+    webhook = WebhookDispatcher()
+    if webhook.is_configured():
+        webhook.send_event(
+            event_type="task_planning",
+            task_id=task_id,
+            title=active.get("title", "Ad-hoc task") if active else "Ad-hoc task",
+            status="PLANNING",
+            details={"prompt": prompt, "planner_contacted": planner_resp is not None}
+        )
+
+    get_telemetry_emitter().emit_lifecycle_event(
+        event_type="task_planning",
+        task_id=task_id,
+        message=f"Task [{task_id}] transitioned to PLANNING: {prompt}",
+        status="PLANNING",
+        details={"prompt": prompt, "planner_contacted": planner_resp is not None},
+    )
+    print("="*58 + "\n")
+
+def cmd_sync(pull: bool = False):
+    task_file = get_task_file()
+    print("\n" + "="*58)
+    print(" 🔄 REAL-TIME CANVAS CONTRACT SYNC")
+    print("="*58)
+
+    if pull:
+        print(" [MODE] Pulling remote canvas note to local .agent/TASK.md...")
+        remote_content = pull_task_cockpit_note()
+        if not remote_content:
+            print(" ❌ [ERROR] Unable to fetch task note from Maestri canvas (socket/CLI unreachable or note not found).")
+            print("="*58 + "\n")
+            return
+
+        active, _ = parse_task_md(remote_content)
+        if not active or not active.get("id"):
+            print(" ❌ [ERROR] Remote note content does not contain valid TASK.md schema. Aborting pull.")
+            print("="*58 + "\n")
+            return
+
+        with open(task_file, "w", encoding="utf-8") as f:
+            f.write(remote_content)
+        print(f" ✅ [OK] Successfully pulled and updated local {task_file} from canvas note.")
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="canvas_sync",
+            task_id=active.get("id", "XX.Y"),
+            message="Pulled task contract from canvas to local TASK.md",
+            status="PULLED",
+            details={"direction": "pull", "task_id": active.get("id")},
+        )
+    else:
+        print(" [MODE] Pushing local .agent/TASK.md to remote canvas note...")
+        with open(task_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        active, _ = parse_task_md(content)
+        ok = sync_task_cockpit_note(content)
+        if ok:
+            print(" ✅ [OK] Successfully synced .agent/TASK.md to Maestri canvas note.")
+        else:
+            print(" ⚠️  [WARN] Note sync skipped or degraded (Maestri CLI or socket not available).")
+
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="canvas_sync",
+            task_id=active.get("id", "XX.Y") if active else "XX.Y",
+            message="Pushed local TASK.md to canvas note",
+            status="PUSHED" if ok else "DEGRADED",
+            details={"direction": "push", "success": ok},
+        )
+    print("="*58 + "\n")
+
+def cmd_notify(msg: str):
+    canvas_ok = send_canvas_notification(msg)
+    webhook = WebhookDispatcher()
+    hook_ok = False
+    if webhook.is_configured():
+        hook_ok = webhook.send_event(
             event_type="notification",
             task_id="MANUAL",
             title=msg,
             status="INFO",
             details={"summary": msg}
         )
-        get_telemetry_emitter().emit_lifecycle_event(
-            event_type="notification",
-            task_id="MANUAL",
-            message=msg,
-            status="INFO",
-            details={"summary": msg},
-        )
-        print("[OK] Notification sent." if ok else "[ERROR] Notification failed.")
+
+    get_telemetry_emitter().emit_lifecycle_event(
+        event_type="notification",
+        task_id="MANUAL",
+        message=msg,
+        status="INFO",
+        details={"summary": msg, "canvas_notified": canvas_ok, "webhook_sent": hook_ok},
+    )
+    print(f"[OK] Notification dispatched (Canvas: {'sent' if canvas_ok else 'skipped'}, Webhook: {'sent' if hook_ok else 'skipped/not configured'}).")
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
+        print(__doc__)
+        sys.exit(0)
+
+    cmd = sys.argv[1].lower()
+    if cmd == "init":
+        cmd_init()
+    elif cmd == "status":
+        cmd_status()
+    elif cmd == "backlog":
+        cmd_backlog()
+    elif cmd == "quota":
+        cmd_quota()
+    elif cmd == "ws":
+        ws_name = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else None
+        cmd_ws(name=ws_name)
+    elif cmd == "plan":
+        if len(sys.argv) < 3:
+            print("[ERROR] Please provide a planning prompt: taskctl plan '<prompt>'")
+            sys.exit(1)
+        plan_prompt = " ".join(sys.argv[2:])
+        cmd_plan(prompt=plan_prompt)
+    elif cmd == "next":
+        weight = "medium"
+        for arg in sys.argv[2:]:
+            if arg in ["light", "medium", "heavy"]:
+                weight = arg
+        cmd_next(weight=weight)
+    elif cmd == "audit":
+        sys.exit(cmd_audit())
+    elif cmd == "done":
+        promote = False
+        custom_msg = None
+        for arg in sys.argv[2:]:
+            if arg in ["-p", "--promote"]:
+                promote = True
+            elif not arg.startswith("-"):
+                custom_msg = arg
+        cmd_done(custom_msg=custom_msg, promote=promote)
+    elif cmd == "sync":
+        pull = "--pull" in sys.argv[2:]
+        cmd_sync(pull=pull)
+    elif cmd == "notify":
+        msg = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Test notification"
+        cmd_notify(msg)
     elif cmd in ["lint-commit", "commit-lint"]:
         file_path = None
         msg_parts = []
