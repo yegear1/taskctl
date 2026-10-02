@@ -17,6 +17,8 @@ from taskctl.core.auditor import (
     SyntaxCompilationRule,
     SecretsBoundaryRule,
     CommitConventionRule,
+    LocalHeuristicScopeRule,
+    HybridScopeRule,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     "SyntaxCompilationRule",
     "SecretsBoundaryRule",
     "CommitConventionRule",
+    "LocalHeuristicScopeRule",
+    "HybridScopeRule",
 ]

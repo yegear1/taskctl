@@ -11,7 +11,9 @@ Commands:
   taskctl quota            Display real-time Multigravity quota across all profiles.
   taskctl plan "<prompt>"  Ask the Planner agent to decompose tasks into .agent/TASK.md.
   taskctl next [--weight]  Promote next backlog task to active (RUNNING) and notify Dev.
-  taskctl audit            Trigger the Scope Auditor to verify diff.
+  taskctl audit [--delegate] [--agent <name>]
+                           Trigger Scope Auditor to verify diff with optional canvas
+                           agent delegation fallback.
                            Returns semantic exit codes:
                              0: [APPROVED] - Ready for taskctl done.
                              1: [CHANGES REQUIRED] - Prints Required Action for auto-remediation.
@@ -273,7 +275,7 @@ def cmd_next(weight: str = "medium"):
         },
     )
 
-def cmd_audit() -> int:
+def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
     from pathlib import Path
     repo_path = Path(find_repo_root())
     task_file = get_task_file()
@@ -286,12 +288,13 @@ def cmd_audit() -> int:
         except Exception:
             pass
 
+    mode_label = f" [HYBRID / DELEGATED to {agent_name or 'Auditor'}]" if delegate else ""
     print("\n" + "="*58)
-    print(" 🛡️ SCOPE AUDITOR VERIFICATION")
+    print(f" 🛡️ SCOPE AUDITOR VERIFICATION{mode_label}")
     print("="*58)
 
     start_audit = time.perf_counter()
-    auditor = ScopeAuditor()
+    auditor = ScopeAuditor(hybrid=delegate, agent_name=agent_name)
     verdict = auditor.run(repo_path)
     audit_duration_ms = (time.perf_counter() - start_audit) * 1000.0
 
@@ -317,6 +320,8 @@ def cmd_audit() -> int:
         details={
             "exit_code": verdict.exit_code,
             "rule_count": len(verdict.results),
+            "hybrid": delegate,
+            "agent": agent_name,
             "rules": [
                 {
                     "rule": r.rule_name,
@@ -338,6 +343,8 @@ def cmd_audit() -> int:
         details={
             "exit_code": verdict.exit_code,
             "rule_count": len(verdict.results),
+            "hybrid": delegate,
+            "agent": agent_name,
             "rules": [
                 {
                     "rule": r.rule_name,
@@ -766,7 +773,21 @@ def main():
                 weight = arg
         cmd_next(weight=weight)
     elif cmd == "audit":
-        sys.exit(cmd_audit())
+        delegate = False
+        agent_name = None
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--delegate", "--hybrid", "-d"]:
+                delegate = True
+                i += 1
+            elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
+                agent_name = args[i + 1]
+                delegate = True
+                i += 2
+            else:
+                i += 1
+        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name))
     elif cmd == "done":
         promote = False
         custom_msg = None
