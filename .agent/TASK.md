@@ -7,10 +7,10 @@
 
 ## Active Task
 
-### 📌 Task [XX.Y]: [Short descriptive title]
+### 📌 Task [02.1]: Advanced provider telemetry & Vector direct sink integration
 
-- **Description:** [Awaiting next planned task or instructions]
-- **Systems Involved:** [taskctl, core, cli]
+- **Description:** Implement structured NDJSON telemetry emission compatible with Vector / VictoriaLogs sink pipeline, capturing task lifecycle events, provider latencies, and execution metadata.
+- **Systems Involved:** [taskctl, telemetry, webhooks]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash-medium'
 - **Action Type:**
   - [ ] Read-only / Documentation
@@ -28,14 +28,14 @@
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
 | [00.0] | Initial scaffolding (ADD greenfield template) | [`1d74dac`] | 2026-10-01 |
-| [01.1] | Taskctl core engine, CLI, providers, and test suite | [`8875338`] | 2026-10-01 |
+| [01.1] | Taskctl core engine, CLI, providers, and test suite | [`8875338`, `d3de1aa`] | 2026-10-01 |
+| [01.2] | Scope auditor rule-based policy expansion | [`b07e582`] | 2026-10-01 |
 
 ---
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[01.2]** [Scope auditor rule-based policy expansion] — `[core]`
-- [ ] **[02.1]** [Advanced provider telemetry & Vector direct sink integration] — `[telemetry]`
+- [ ] **[02.2]** [Automated commit message Conventional Commits linter & policy] — `[core]`
 
 ---
 
