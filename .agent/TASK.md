@@ -7,23 +7,23 @@
 
 ## Active Task
 
-### 📌 Task [01.1]: Align webhook dispatcher with the fail-safe timeout contract
+### 📌 Task [01.2]: Publish a versioned JSON schema for webhook and Vector telemetry payloads
 
-- **Description:** The v0.1.0 notes require a 2-second fail-safe webhook timeout. `WebhookDispatcher` still posts with a hardcoded 5-second timeout and ignores `TASKCTL_WEBHOOK_TOKEN`. Read both from the environment, keep delivery non-blocking, and document the variables in `.env.example`.
-- **Systems Involved:** [webhooks, docs, tests]
+- **Description:** The generic webhook body (`event`, `task_id`, `title`, `status`, `details`) and the Vector sink body (`TelemetryEvent.to_dict()`) have no versioned schema. Publish JSON Schema documents that pin both contracts, and validate representative payloads in hermetic tests.
+- **Systems Involved:** [webhooks, telemetry, docs, tests]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash'
 - **Action Type:**
   - [ ] Read-only / Documentation
   - [x] Source code changes
-- **Status:** RUNNING
+- **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [x] Webhook HTTP timeout defaults to 2.0 seconds and honors `TASKCTL_TELEMETRY_TIMEOUT` (or a dedicated webhook timeout env) without raising on expiry.
-- [x] When `TASKCTL_WEBHOOK_TOKEN` is set, the request sends `Authorization: Bearer <token>`. When unset, the header is omitted.
-- [x] Unreachable URLs, non-HTTP URLs, and HTTP errors still return failure and never abort the caller.
-- [x] Hermetic tests cover timeout, bearer header, and the fail-safe paths.
-- [x] `.env.example` documents the timeout and token variables consumed by the dispatcher.
+- [ ] A versioned JSON Schema covers the generic webhook event object posted by `WebhookDispatcher` for non-Discord, non-Slack URLs.
+- [ ] A versioned JSON Schema covers the canonical Vector payload produced by `TelemetryEvent.to_dict()`, including required VictoriaLogs root fields and optional trace attributes.
+- [ ] Discord and Slack adapter bodies stay outside the canonical webhook schema.
+- [ ] Hermetic tests reject invalid payloads and accept current dispatcher and sink examples, with zero network calls.
+- [ ] Schema file paths and versions are documented next to the webhook and Vector variables in `.env.example` or the schema directory README.
 
 ---
 
@@ -31,14 +31,14 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [01.1] | Align webhook dispatcher with the fail-safe timeout contract | [`fbc9fe3`] | 2026-10-04 |
 | [00.1] | Post-release perimeter sync and backlog roadmap planning | [`ef0e5b6`] | 2026-10-04 |
 
 ---
 
 ## Backlog (Upcoming, in priority order)
 
-1. **[01.2]** Publish a versioned JSON schema for webhook and Vector telemetry payloads.
-2. **[02.1]** Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check`.
+1. **[02.1]** Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check`.
 
 ---
 
