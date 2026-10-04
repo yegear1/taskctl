@@ -53,7 +53,7 @@ taskctl --help
 | `taskctl backlog` | List upcoming backlog items. |
 | `taskctl plan "<prompt>"` | Request planner decomposition of upcoming tasks into `.agent/TASK.md`. |
 | `taskctl next [light\|medium\|heavy] [--agent <name>] [--no-handoff]` | Promote the next backlog task to `RUNNING` and hand off to the builder. |
-| `taskctl audit [--delegate] [--agent <name>]` | Run Scope Auditor on staged diffs and git hygiene. Exit `0` / `1` / `2`. |
+| `taskctl audit [--delegate] [--agent <name>] [--domain-lint]` | Run Scope Auditor on staged diffs and git hygiene. Exit `0` / `1` / `2`. `--domain-lint` or `TASKCTL_DOMAIN_LINT=1` also checks that the active task has non-empty acceptance criteria. |
 | `taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>]` | Validate a message against Conventional Commits. Alias: `commit-lint`. |
 | `taskctl done [message] [-p] [--agent <name>] [--no-handoff]` | Validate DoD, create the feature commit and the governance commit, dispatch webhook. |
 | `taskctl graph [--mermaid\|--json\|--check-cycles] [--file <path>]` | Render the task dependency DAG. Exit `1` when a cycle is found. |

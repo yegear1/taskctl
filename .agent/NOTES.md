@@ -64,6 +64,11 @@
 - **Decision:** Implement `TaskDependencyGraph` in `taskctl.core.graph` supporting explicit markdown prerequisites (`- **Depends On:**`, `(deps: ...)`), implicit sequential fallback for epics/subtasks, cycle detection via DFS coloring, ASCII tree visualization, Mermaid generation, and interactive TUI DAG view (`taskctl graph`, `taskctl ui --dag`).
 - **Consequences:** 100% hermetic DAG validation and visualization with zero non-standard external dependencies.
 
+### 2026-10-04 Opt-in acceptance-criteria lint
+- **Context:** `GitHygieneRule` only runs `git diff --check`. Domain checks on task-contract text must not change the default `taskctl audit` verdict.
+- **Decision:** `AcceptanceCriteriaRule` (`dod-criteria`) runs only when `taskctl audit --domain-lint` is passed or `TASKCTL_DOMAIN_LINT` is `1`, `true`, `yes`, or `on`. It requires at least one non-empty acceptance criterion.
+- **Consequences:** Default rule chain and exit-code mapping stay unchanged. Empty or blank criteria fail with `CHANGES REQUIRED` only on the opt-in path.
+
 ### 2026-10-04 Versioned webhook and Vector payload schemas
 - **Context:** Generic webhook bodies and `TelemetryEvent.to_dict()` had no pinned contract for downstream listeners.
 - **Decision:** Publish JSON Schema draft 2020-12 documents at `taskctl/schemas/v1/` (v1.0.0) and validate the keyword subset they use with the standard library. Discord and Slack bodies stay adapter-specific.
@@ -103,4 +108,4 @@
 
 | Debt | Rationale | Revisit When |
 |---|---|---|
-| Basic `git diff --check` in audit | Fast initial gate for git hygiene without heavy linter setup | When custom domain lint rules are requested |
+| Hand-rolled argv parsing in `taskctl/cli.py` | Keeps the CLI on the standard library | When a typed parser refactor is explicitly requested |

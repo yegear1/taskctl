@@ -53,7 +53,7 @@ taskctl --help
 | `taskctl backlog` | Lista os itens do backlog. |
 | `taskctl plan "<prompt>"` | Solicita ao Planner a decomposição de tarefas no `.agent/TASK.md`. |
 | `taskctl next [light\|medium\|heavy] [--agent <nome>] [--no-handoff]` | Promove a próxima tarefa para `RUNNING` e faz o hand-off ao builder. |
-| `taskctl audit [--delegate] [--agent <nome>]` | Auditor de Escopo nos diffs e na higiene do git. Saída `0` / `1` / `2`. |
+| `taskctl audit [--delegate] [--agent <nome>] [--domain-lint]` | Auditor de Escopo nos diffs e na higiene do git. Saída `0` / `1` / `2`. `--domain-lint` ou `TASKCTL_DOMAIN_LINT=1` também exige critérios de aceitação não vazios. |
 | `taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>]` | Valida a mensagem contra Conventional Commits. Alias: `commit-lint`. |
 | `taskctl done [mensagem] [-p] [--agent <nome>] [--no-handoff]` | Valida o DoD, gera o commit da feature e o de governança, e envia o webhook. |
 | `taskctl graph [--mermaid\|--json\|--check-cycles] [--file <path>]` | Renderiza o DAG de dependências. Saída `1` se houver ciclo. |

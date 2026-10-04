@@ -154,6 +154,74 @@ class TaskContractRule:
         )
 
 
+_DOMAIN_LINT_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def domain_lint_enabled(flag: bool = False) -> bool:
+    """Return whether opt-in domain lint rules should run.
+
+    Enabled by an explicit CLI flag or by TASKCTL_DOMAIN_LINT set to
+    1, true, yes, or on. Default is off so the audit verdict stays unchanged.
+    """
+    if flag:
+        return True
+    raw = os.environ.get("TASKCTL_DOMAIN_LINT", "").strip().lower()
+    return raw in _DOMAIN_LINT_TRUTHY
+
+
+class AcceptanceCriteriaRule:
+    """Opt-in check that the active task lists non-empty acceptance criteria."""
+
+    rule_name: str = "dod-criteria"
+
+    def evaluate(self, repo_path: Path) -> RuleResult:
+        task_file = repo_path / ".agent" / "TASK.md"
+        if not task_file.exists():
+            return RuleResult(
+                rule_name=self.rule_name,
+                severity=AuditSeverity.REJECTED,
+                message="Missing required contract file: .agent/TASK.md",
+            )
+
+        try:
+            content = task_file.read_text(encoding="utf-8")
+            active_task, _backlog = parse_task_md(content)
+        except Exception as e:
+            return RuleResult(
+                rule_name=self.rule_name,
+                severity=AuditSeverity.REJECTED,
+                message=f"Failed to parse .agent/TASK.md: {e}",
+            )
+
+        criteria = active_task.get("criteria") or []
+        if not criteria:
+            return RuleResult(
+                rule_name=self.rule_name,
+                severity=AuditSeverity.CHANGES_REQUIRED,
+                message="Active task has no acceptance criteria.",
+            )
+
+        blank_indexes = [
+            index
+            for index, item in enumerate(criteria)
+            if not str(item.get("text", "")).strip()
+        ]
+        if blank_indexes:
+            return RuleResult(
+                rule_name=self.rule_name,
+                severity=AuditSeverity.CHANGES_REQUIRED,
+                message="Active task has acceptance criteria with empty text.",
+                details={"blank_indexes": blank_indexes},
+            )
+
+        return RuleResult(
+            rule_name=self.rule_name,
+            severity=AuditSeverity.APPROVED,
+            message=f"Acceptance criteria verified: {len(criteria)} item(s).",
+            details={"criteria_count": len(criteria)},
+        )
+
+
 class SyntaxCompilationRule:
     """Verifies all Python source files in the repository compile cleanly without syntax errors."""
 
@@ -622,14 +690,20 @@ class ScopeAuditor:
         delegate: bool = False,
         agent_name: Optional[str] = None,
         timeout: float = 15.0,
+        domain_lint: bool = False,
     ):
-        self.rules = rules or [
-            GitHygieneRule(),
-            TaskContractRule(),
-            SyntaxCompilationRule(),
-            SecretsBoundaryRule(),
-            CommitConventionRule(),
-        ]
+        if rules is None:
+            self.rules = [
+                GitHygieneRule(),
+                TaskContractRule(),
+                SyntaxCompilationRule(),
+                SecretsBoundaryRule(),
+                CommitConventionRule(),
+            ]
+            if domain_lint:
+                self.rules.append(AcceptanceCriteriaRule())
+        else:
+            self.rules = rules
         self.hybrid = hybrid or delegate
         self.agent_name = agent_name
         self.timeout = timeout

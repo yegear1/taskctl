@@ -15,14 +15,14 @@
 - **Action Type:**
   - [ ] Read-only / Documentation
   - [x] Source code changes
-- **Status:** READY FOR PLANNING
+- **Status:** RUNNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] With domain lint disabled, `taskctl audit` still applies `GitHygieneRule` via `git diff --check` and keeps the current exit-code mapping.
-- [ ] An explicit opt-in (CLI flag or environment variable) enables at least one domain rule that inspects task-contract content beyond whitespace and conflict markers.
-- [ ] Hermetic tests cover the disabled path and the enabled path, including one failing domain finding.
-- [ ] The opt-in switch is documented in command help or `README.md`.
+- [x] With domain lint disabled, `taskctl audit` still applies `GitHygieneRule` via `git diff --check` and keeps the current exit-code mapping.
+- [x] An explicit opt-in (CLI flag or environment variable) enables at least one domain rule that inspects task-contract content beyond whitespace and conflict markers.
+- [x] Hermetic tests cover the disabled path and the enabled path, including one failing domain finding.
+- [x] The opt-in switch is documented in command help or `README.md`.
 
 ---
 

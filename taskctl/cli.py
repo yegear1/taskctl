@@ -13,9 +13,10 @@ Commands:
   taskctl next [--weight] [--agent <name>] [--no-handoff]
                            Promote next backlog task to active (RUNNING) and dispatch
                            lifecycle hand-off context to Builder agent.
-  taskctl audit [--delegate] [--agent <name>]
+  taskctl audit [--delegate] [--agent <name>] [--domain-lint]
                            Trigger Scope Auditor to verify diff with optional canvas
-                           agent delegation fallback.
+                           agent delegation fallback. --domain-lint (or
+                           TASKCTL_DOMAIN_LINT=1) also checks acceptance criteria.
                            Returns semantic exit codes:
                              0: [APPROVED] - Ready for taskctl done.
                              1: [CHANGES REQUIRED] - Prints Required Action for auto-remediation.
@@ -57,7 +58,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md
-from taskctl.core.auditor import ScopeAuditor, AuditSeverity
+from taskctl.core.auditor import ScopeAuditor, AuditSeverity, domain_lint_enabled
 from taskctl.core.commits import parse_conventional_commit
 from taskctl.providers.multigravity import get_profile_quotas, route_target
 from taskctl.providers.maestri import (
@@ -409,7 +410,11 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
             else:
                 print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
 
-def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
+def cmd_audit(
+    delegate: bool = False,
+    agent_name: Optional[str] = None,
+    domain_lint: bool = False,
+) -> int:
     from pathlib import Path
     repo_path = Path(find_repo_root())
     task_file = get_task_file()
@@ -430,7 +435,12 @@ def cmd_audit(delegate: bool = False, agent_name: Optional[str] = None) -> int:
         print("="*58)
 
         start_audit = time.perf_counter()
-        auditor = ScopeAuditor(hybrid=delegate, agent_name=agent_name)
+        domain_lint_on = domain_lint_enabled(domain_lint)
+        auditor = ScopeAuditor(
+            hybrid=delegate,
+            agent_name=agent_name,
+            domain_lint=domain_lint_on,
+        )
         verdict = auditor.run(repo_path)
         audit_duration_ms = (time.perf_counter() - start_audit) * 1000.0
 
@@ -1119,11 +1129,15 @@ def main():
     elif cmd == "audit":
         delegate = False
         agent_name = None
+        domain_lint = False
         args = sys.argv[2:]
         i = 0
         while i < len(args):
             if args[i] in ["--delegate", "--hybrid", "-d"]:
                 delegate = True
+                i += 1
+            elif args[i] in ["--domain-lint"]:
+                domain_lint = True
                 i += 1
             elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
                 agent_name = args[i + 1]
@@ -1131,7 +1145,7 @@ def main():
                 i += 2
             else:
                 i += 1
-        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name))
+        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name, domain_lint=domain_lint))
     elif cmd == "done":
         promote = False
         custom_msg = None

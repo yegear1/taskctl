@@ -11,6 +11,8 @@ import subprocess
 from taskctl.core.auditor import (
     AuditSeverity,
     GitHygieneRule,
+    AcceptanceCriteriaRule,
+    domain_lint_enabled,
     TaskContractRule,
     SyntaxCompilationRule,
     SecretsBoundaryRule,
@@ -175,7 +177,92 @@ class TestScopeAuditor(unittest.TestCase):
         auditor = ScopeAuditor()
         rule_names = [r.rule_name for r in auditor.rules]
         self.assertIn("commit-convention", rule_names)
+        self.assertIn("git-hygiene", rule_names)
+        self.assertNotIn("dod-criteria", rule_names)
         self.assertEqual(len(rule_names), 5)
+
+    def _write_task(self, body: str) -> None:
+        agent_dir = self.repo_path / ".agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "TASK.md").write_text(body, encoding="utf-8")
+
+    def test_domain_lint_disabled_keeps_hygiene_and_exit_mapping(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TASKCTL_DOMAIN_LINT", None)
+            self.assertFalse(domain_lint_enabled(False))
+        with patch.dict(os.environ, {"TASKCTL_DOMAIN_LINT": "0"}, clear=False):
+            self.assertFalse(domain_lint_enabled(False))
+        auditor = ScopeAuditor(domain_lint=False)
+        self.assertEqual([r.rule_name for r in auditor.rules], [
+            "git-hygiene",
+            "task-contract",
+            "syntax-compilation",
+            "secrets-boundary",
+            "commit-convention",
+        ])
+        hygiene = auditor.rules[0]
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="file.py:1: trailing whitespace.\n")
+            result = hygiene.evaluate(self.repo_path)
+            self.assertEqual(mock_run.call_args[0][0][:3], ["git", "diff", "--check"])
+        self.assertEqual(result.rule_name, "git-hygiene")
+        self.assertEqual(result.severity, AuditSeverity.CHANGES_REQUIRED)
+        self.assertEqual(result.exit_code, 1)
+
+    def test_domain_lint_enabled_by_flag_or_env(self):
+        self.assertTrue(domain_lint_enabled(True))
+        with patch.dict(os.environ, {"TASKCTL_DOMAIN_LINT": "1"}, clear=False):
+            self.assertTrue(domain_lint_enabled(False))
+        with patch.dict(os.environ, {"TASKCTL_DOMAIN_LINT": "yes"}, clear=False):
+            self.assertTrue(domain_lint_enabled(False))
+        auditor = ScopeAuditor(domain_lint=True)
+        self.assertIn("dod-criteria", [r.rule_name for r in auditor.rules])
+        self.assertEqual(len(auditor.rules), 6)
+
+    def test_acceptance_criteria_rule_pass(self):
+        self._write_task(
+            """# TASK.md
+### 📌 Task [02.1]: Domain lint
+- **Status:** RUNNING
+### Acceptance Criteria
+- [ ] Criterion stays unchecked
+- [x] Criterion is done
+"""
+        )
+        result = AcceptanceCriteriaRule().evaluate(self.repo_path)
+        self.assertEqual(result.severity, AuditSeverity.APPROVED)
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.details["criteria_count"], 2)
+
+    def test_acceptance_criteria_rule_missing_criteria(self):
+        self._write_task(
+            """# TASK.md
+### 📌 Task [02.1]: Domain lint
+- **Status:** RUNNING
+### Acceptance Criteria
+"""
+        )
+        result = AcceptanceCriteriaRule().evaluate(self.repo_path)
+        self.assertEqual(result.severity, AuditSeverity.CHANGES_REQUIRED)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("no acceptance criteria", result.message)
+
+        auditor = ScopeAuditor(rules=[AcceptanceCriteriaRule()])
+        verdict = auditor.run(self.repo_path)
+        self.assertEqual(verdict.exit_code, 1)
+        self.assertEqual(verdict.results[0].rule_name, "dod-criteria")
+
+    def test_acceptance_criteria_rule_blank_text(self):
+        self._write_task(
+            "# TASK.md\n"
+            "### 📌 Task [02.1]: Domain lint\n"
+            "- **Status:** RUNNING\n"
+            "### Acceptance Criteria\n"
+            "- [ ]\n"
+        )
+        result = AcceptanceCriteriaRule().evaluate(self.repo_path)
+        self.assertEqual(result.severity, AuditSeverity.CHANGES_REQUIRED)
+        self.assertEqual(result.details["blank_indexes"], [0])
 
     def test_scope_auditor_aggregate(self):
         mock_rule1 = MagicMock()
