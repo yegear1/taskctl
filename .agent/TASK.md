@@ -7,23 +7,22 @@
 
 ## Active Task
 
-### 📌 Task [01.2]: Publish a versioned JSON schema for webhook and Vector telemetry payloads
+### 📌 Task [02.1]: Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check`
 
-- **Description:** The generic webhook body (`event`, `task_id`, `title`, `status`, `details`) and the Vector sink body (`TelemetryEvent.to_dict()`) have no versioned schema. Publish JSON Schema documents that pin both contracts, and validate representative payloads in hermetic tests.
-- **Systems Involved:** [webhooks, telemetry, docs, tests]
+- **Description:** `GitHygieneRule` only runs `git diff --check`. Add domain lint rules that stay off unless explicitly enabled, so the default `taskctl audit` verdict does not change.
+- **Systems Involved:** [auditor, cli, tests, docs]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash'
 - **Action Type:**
   - [ ] Read-only / Documentation
   - [x] Source code changes
-- **Status:** RUNNING
+- **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [x] A versioned JSON Schema covers the generic webhook event object posted by `WebhookDispatcher` for non-Discord, non-Slack URLs.
-- [x] A versioned JSON Schema covers the canonical Vector payload produced by `TelemetryEvent.to_dict()`, including required VictoriaLogs root fields and optional trace attributes.
-- [x] Discord and Slack adapter bodies stay outside the canonical webhook schema.
-- [x] Hermetic tests reject invalid payloads and accept current dispatcher and sink examples, with zero network calls.
-- [x] Schema file paths and versions are documented next to the webhook and Vector variables in `.env.example` or the schema directory README.
+- [ ] With domain lint disabled, `taskctl audit` still applies `GitHygieneRule` via `git diff --check` and keeps the current exit-code mapping.
+- [ ] An explicit opt-in (CLI flag or environment variable) enables at least one domain rule that inspects task-contract content beyond whitespace and conflict markers.
+- [ ] Hermetic tests cover the disabled path and the enabled path, including one failing domain finding.
+- [ ] The opt-in switch is documented in command help or `README.md`.
 
 ---
 
@@ -31,6 +30,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [01.2] | Publish a versioned JSON schema for webhook and Vector telemetry payloads | [`983b7a9`] | 2026-10-04 |
 | [01.1] | Align webhook dispatcher with the fail-safe timeout contract | [`fbc9fe3`] | 2026-10-04 |
 | [00.1] | Post-release perimeter sync and backlog roadmap planning | [`ef0e5b6`] | 2026-10-04 |
 
@@ -38,7 +38,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-1. **[02.1]** Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check`.
+*(Backlog empty)*
 
 ---
 
