@@ -6,9 +6,37 @@ import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any, List
 
+_DEFAULT_TIMEOUT = 2.0
+
+
+def _resolve_timeout(timeout: float) -> float:
+    """Honor TASKCTL_TELEMETRY_TIMEOUT, falling back to a positive default."""
+    raw = os.environ.get("TASKCTL_TELEMETRY_TIMEOUT")
+    candidate = timeout
+    if raw is not None and raw.strip():
+        try:
+            candidate = float(raw)
+        except ValueError:
+            candidate = timeout
+    if candidate <= 0:
+        return _DEFAULT_TIMEOUT
+    return float(candidate)
+
+
+def _bearer_token() -> Optional[str]:
+    token = os.environ.get("TASKCTL_WEBHOOK_TOKEN")
+    if token is None:
+        return None
+    token = token.strip()
+    if not token:
+        return None
+    return token
+
+
 class WebhookDispatcher:
-    def __init__(self, webhook_url: Optional[str] = None):
+    def __init__(self, webhook_url: Optional[str] = None, timeout: float = _DEFAULT_TIMEOUT):
         self.webhook_url = webhook_url or os.environ.get("TASKCTL_WEBHOOK_URL")
+        self.timeout = _resolve_timeout(timeout)
 
     def is_configured(self) -> bool:
         return bool(self.webhook_url and self.webhook_url.strip().startswith("http"))
@@ -114,13 +142,20 @@ class WebhookDispatcher:
     def _post_json(self, url: str, payload: Dict[str, Any]) -> bool:
         try:
             data = json.dumps(payload).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "taskctl-cli/0.2.0",
+            }
+            token = _bearer_token()
+            if token is not None:
+                headers["Authorization"] = f"Bearer {token}"
             req = urllib.request.Request(
                 url,
                 data=data,
-                headers={"Content-Type": "application/json", "User-Agent": "taskctl-cli/0.2.0"},
+                headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=5) as response:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 return response.status in (200, 204)
         except Exception as e:
             # Non-blocking by invariant 3

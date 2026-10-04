@@ -15,15 +15,15 @@
 - **Action Type:**
   - [ ] Read-only / Documentation
   - [x] Source code changes
-- **Status:** READY FOR PLANNING
+- **Status:** RUNNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Webhook HTTP timeout defaults to 2.0 seconds and honors `TASKCTL_TELEMETRY_TIMEOUT` (or a dedicated webhook timeout env) without raising on expiry.
-- [ ] When `TASKCTL_WEBHOOK_TOKEN` is set, the request sends `Authorization: Bearer <token>`. When unset, the header is omitted.
-- [ ] Unreachable URLs, non-HTTP URLs, and HTTP errors still return failure and never abort the caller.
-- [ ] Hermetic tests cover timeout, bearer header, and the fail-safe paths.
-- [ ] `.env.example` documents the timeout and token variables consumed by the dispatcher.
+- [x] Webhook HTTP timeout defaults to 2.0 seconds and honors `TASKCTL_TELEMETRY_TIMEOUT` (or a dedicated webhook timeout env) without raising on expiry.
+- [x] When `TASKCTL_WEBHOOK_TOKEN` is set, the request sends `Authorization: Bearer <token>`. When unset, the header is omitted.
+- [x] Unreachable URLs, non-HTTP URLs, and HTTP errors still return failure and never abort the caller.
+- [x] Hermetic tests cover timeout, bearer header, and the fail-safe paths.
+- [x] `.env.example` documents the timeout and token variables consumed by the dispatcher.
 
 ---
 
