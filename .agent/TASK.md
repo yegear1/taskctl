@@ -15,15 +15,15 @@
 - **Action Type:**
   - [ ] Read-only / Documentation
   - [x] Source code changes
-- **Status:** READY FOR PLANNING
+- **Status:** RUNNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] A versioned JSON Schema covers the generic webhook event object posted by `WebhookDispatcher` for non-Discord, non-Slack URLs.
-- [ ] A versioned JSON Schema covers the canonical Vector payload produced by `TelemetryEvent.to_dict()`, including required VictoriaLogs root fields and optional trace attributes.
-- [ ] Discord and Slack adapter bodies stay outside the canonical webhook schema.
-- [ ] Hermetic tests reject invalid payloads and accept current dispatcher and sink examples, with zero network calls.
-- [ ] Schema file paths and versions are documented next to the webhook and Vector variables in `.env.example` or the schema directory README.
+- [x] A versioned JSON Schema covers the generic webhook event object posted by `WebhookDispatcher` for non-Discord, non-Slack URLs.
+- [x] A versioned JSON Schema covers the canonical Vector payload produced by `TelemetryEvent.to_dict()`, including required VictoriaLogs root fields and optional trace attributes.
+- [x] Discord and Slack adapter bodies stay outside the canonical webhook schema.
+- [x] Hermetic tests reject invalid payloads and accept current dispatcher and sink examples, with zero network calls.
+- [x] Schema file paths and versions are documented next to the webhook and Vector variables in `.env.example` or the schema directory README.
 
 ---
 

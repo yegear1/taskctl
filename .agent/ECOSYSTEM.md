@@ -48,7 +48,7 @@
 
 | Route / Topic | Consumer(s) | Payload / Schema | Breaking Change Risk | Deprecation Policy |
 | :--- | :--- | :--- | :---: | :--- |
-| `WebhookDispatcher` | Vector / Telemetry Listeners | Task lifecycle event JSON (`task_started`, `audit`, `task_completed`) | **LOW** | Expand & contract |
+| `WebhookDispatcher` | Vector / Telemetry Listeners | Generic event JSON, schema `taskctl/schemas/v1/webhook-event.schema.json` v1.0.0 (`task_started`, `audit`, `task_completed`). Discord and Slack bodies are adapters outside that schema. | **LOW** | Expand & contract |
 | CLI Exit Codes | CI / Git Pre-commit Hooks | Semantic exit codes (`0: Approved`, `1: Changes Required`, `2: Rejected`) | **HIGH** | Strict SemVer |
 
 ---

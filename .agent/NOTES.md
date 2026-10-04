@@ -64,6 +64,11 @@
 - **Decision:** Implement `TaskDependencyGraph` in `taskctl.core.graph` supporting explicit markdown prerequisites (`- **Depends On:**`, `(deps: ...)`), implicit sequential fallback for epics/subtasks, cycle detection via DFS coloring, ASCII tree visualization, Mermaid generation, and interactive TUI DAG view (`taskctl graph`, `taskctl ui --dag`).
 - **Consequences:** 100% hermetic DAG validation and visualization with zero non-standard external dependencies.
 
+### 2026-10-04 Versioned webhook and Vector payload schemas
+- **Context:** Generic webhook bodies and `TelemetryEvent.to_dict()` had no pinned contract for downstream listeners.
+- **Decision:** Publish JSON Schema draft 2020-12 documents at `taskctl/schemas/v1/` (v1.0.0) and validate the keyword subset they use with the standard library. Discord and Slack bodies stay adapter-specific.
+- **Consequences:** Contract tests remain hermetic with zero new dependencies. External tools can still consume the schema documents directly.
+
 ### 2026-10-02 Task Lifecycle Distributed Tracing & Telemetry Spans
 - **Context:** Tracing multi-agent lifecycle phases, measuring operation latencies, and alerting on SLA violations without heavy external dependencies.
 - **Decision:** Implement W3C-compatible `TraceContext`, `Span`, `Tracer`, and `DurationAnalyzer` in `taskctl.telemetry.tracing`, auto-enriching `TelemetryEvent` and `VectorSink` payloads with `trace_id`, `span_id`, and `parent_span_id`, while triggering fail-safe `sla_alert` events on threshold breach (`taskctl trace`).
@@ -81,8 +86,8 @@
 | `taskctl graph` | `taskctl` | CLI / CI / Markdown Docs | ASCII Tree, Mermaid `graph TD`, JSON, or Exit Code (`0: Clean`, `1: Cycle`) |
 | `taskctl trace` | `taskctl` | CLI / CI / Developer | ASCII Waterfall Tree, Trace Spans JSON, or SLA duration analytics |
 | `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
-| `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | JSON Task Lifecycle Event |
-| `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs NDJSON/JSON |
+| `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | Generic JSON `taskctl/schemas/v1/webhook-event.schema.json` v1.0.0; Discord and Slack adapters are separate |
+| `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs JSON (`taskctl/schemas/v1/vector-event.schema.json` v1.0.0) |
 | `MaestriIPCClient` / CLI | `taskctl` | Maestri Spatial Canvas | JSON-RPC / CLI notes & workspace commands |
 
 ---

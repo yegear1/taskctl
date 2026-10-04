@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yegear1/taskctl/schemas/v1/vector-event.schema.json",
+  "title": "taskctl Vector telemetry event",
+  "description": "Canonical JSON object produced by TelemetryEvent.to_dict() and posted to the Vector HTTP sink. Stream dimensions are limited to service, app, and env. Trace and task attributes are event fields.",
+  "x-taskctl-schema-version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["timestamp", "level", "service", "app", "env", "message"],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "UTC ISO-8601 with millisecond precision and a Z suffix."
+    },
+    "level": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error"]
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "app": {
+      "type": "string",
+      "minLength": 1
+    },
+    "env": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "number"
+    },
+    "event_type": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    },
+    "trace_id": {
+      "type": "string"
+    },
+    "span_id": {
+      "type": "string"
+    },
+    "parent_span_id": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "http_status": {
+      "type": "integer"
+    },
+    "stack_trace": {
+      "type": "string"
+    },
+    "details": {
+      "type": "object",
+      "description": "Event metadata. Not a VictoriaLogs stream field."
+    }
+  }
+}

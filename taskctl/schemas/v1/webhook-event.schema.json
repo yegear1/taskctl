@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yegear1/taskctl/schemas/v1/webhook-event.schema.json",
+  "title": "taskctl generic webhook event",
+  "description": "JSON body posted by WebhookDispatcher to non-Discord, non-Slack URLs. Discord embeds and Slack blocks are transport adapters and are not part of this contract.",
+  "x-taskctl-schema-version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "task_id", "title", "status", "details"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Lifecycle event name, such as audit or task_completed."
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Task id without brackets, such as 01.2."
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "details": {
+      "type": "object",
+      "description": "Caller-supplied metadata. High-cardinality values stay inside this object."
+    }
+  }
+}

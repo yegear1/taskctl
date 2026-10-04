@@ -25,3 +25,6 @@ taskctl = "taskctl.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["taskctl*"]
+
+[tool.setuptools.package-data]
+"taskctl.schemas" = ["v1/*.json", "v1/*.md"]
