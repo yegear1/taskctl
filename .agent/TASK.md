@@ -7,21 +7,23 @@
 
 ## Active Task
 
-### 📌 Task [00.1]: Post-release perimeter sync and backlog roadmap planning
+### 📌 Task [01.1]: Align webhook dispatcher with the fail-safe timeout contract
 
-- **Description:** Sync repository perimeter (.env.example, README.md, CI workflows) to v0.1.0 release baseline, plan upcoming milestone epics, and establish next release objectives.
-- **Systems Involved:** [governance, docs, perimeter]
+- **Description:** The v0.1.0 notes require a 2-second fail-safe webhook timeout. `WebhookDispatcher` still posts with a hardcoded 5-second timeout and ignores `TASKCTL_WEBHOOK_TOKEN`. Read both from the environment, keep delivery non-blocking, and document the variables in `.env.example`.
+- **Systems Involved:** [webhooks, docs, tests]
 - **Runtime Target:** Profile 'yegear' | Model: 'gemini-3.8-flash'
 - **Action Type:**
-  - [x] Read-only / Documentation
-  - [ ] Source code changes
+  - [ ] Read-only / Documentation
+  - [x] Source code changes
 - **Status:** READY FOR PLANNING
   *(Workflow: `READY FOR PLANNING` → `PLANNING` on presenting plan → approval → `RUNNING`)*
 
 ### Acceptance Criteria
-- [ ] Audit repository perimeter files against published release v0.1.0.
-- [ ] Formulate upcoming epics and populate backlog in `.agent/TASK.md`.
-- [ ] Ensure all tests and governance policies remain passing with zero regressions.
+- [ ] Webhook HTTP timeout defaults to 2.0 seconds and honors `TASKCTL_TELEMETRY_TIMEOUT` (or a dedicated webhook timeout env) without raising on expiry.
+- [ ] When `TASKCTL_WEBHOOK_TOKEN` is set, the request sends `Authorization: Bearer <token>`. When unset, the header is omitted.
+- [ ] Unreachable URLs, non-HTTP URLs, and HTTP errors still return failure and never abort the caller.
+- [ ] Hermetic tests cover timeout, bearer header, and the fail-safe paths.
+- [ ] `.env.example` documents the timeout and token variables consumed by the dispatcher.
 
 ---
 
@@ -29,12 +31,14 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [00.1] | Post-release perimeter sync and backlog roadmap planning | [`ef0e5b6`] | 2026-10-04 |
 
 ---
 
 ## Backlog (Upcoming, in priority order)
 
-*(Backlog empty - awaiting post-release roadmap planning)*
+1. **[01.2]** Publish a versioned JSON schema for webhook and Vector telemetry payloads.
+2. **[02.1]** Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check`.
 
 ---
 
@@ -46,7 +50,7 @@ Release/tag only with explicit human request. When triggered, the ID is `[99.1]`
 
 ## Future Backlog / Ideas (Unprioritized)
 
-*(Future backlog empty)*
+- Replace hand-rolled argv parsing in `taskctl/cli.py` with a typed parser (refactor epic only when requested).
 
 ---
 
