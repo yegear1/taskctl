@@ -42,6 +42,9 @@ Commands:
   taskctl trace [--last] [--id <trace_id>] [--json] [--analytics]
                            Display distributed trace spans, waterfall tree, and SLA duration metrics.
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
+  taskctl guard [eval|status|test]
+                           Inspect guardrail status, evaluate commands against active policy,
+                           and run diagnostic test matrix for terminal interception.
 """
 
 import os
@@ -1064,6 +1067,119 @@ def cmd_trace(
     print("=" * 58 + "\n")
     return 0
 
+def cmd_guard(subcmd: str, args: List[str]) -> int:
+    """Diagnostic CLI for inspecting guardrails, evaluating commands, and testing."""
+    repo_root = find_repo_root()
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+    try:
+        from scripts.aether_guard import AetherGuard, RiskLevel
+    except ImportError:
+        alt_roots = [
+            os.path.expanduser("~/github/ia-maestri"),
+            "/home/yegear/github/ia-maestri",
+        ]
+        loaded = False
+        for alt in alt_roots:
+            if os.path.isfile(os.path.join(alt, "scripts", "aether_guard.py")):
+                if alt not in sys.path:
+                    sys.path.insert(0, alt)
+                try:
+                    from scripts.aether_guard import AetherGuard, RiskLevel
+                    loaded = True
+                    break
+                except ImportError:
+                    pass
+        if not loaded:
+            print("[ERROR] Could not import 'aether-guard' module. Ensure scripts/aether_guard.py exists.")
+            return 1
+
+    guard = AetherGuard()
+
+    if subcmd == "status":
+        json_output = "--json" in args
+        status = guard.get_status()
+        if json_output:
+            import json
+            print(json.dumps(status, indent=2))
+            return 0
+        print("=" * 60)
+        print(" 🛡️  TASKCTL GUARD: STATUS & POLICY TELEMETRY")
+        print("=" * 60)
+        print(f" Config File    : {status['config_file']}")
+        print(f" Safe Limit     : {status['safe_limit']:.2f}")
+        print(f" Audit Limit    : {status['audit_limit']:.2f}")
+        print(f" Fast-Path Rules: {status['fast_path_patterns_count']} compiled regexes")
+        print(f" Denylist Rules : {status['denylist_patterns_count']} critical signatures")
+        print(f" Suspicious Rls : {status['suspicious_patterns_count']} patterns with weights")
+        print(f" Roles Loaded   : {', '.join(status['configured_roles']) or 'none'}")
+        print(f" Maestri Socket : {status['socket_path']} (Available: {status['socket_available']})")
+        print(f" Telemetry Sinks: file={status['telemetry_log_file']} | http={status['telemetry_sink_url']}")
+        print("=" * 60)
+        return 0
+
+    elif subcmd == "eval":
+        if not args:
+            print("[ERROR] Please specify a command to evaluate: taskctl guard eval '<cmd>' [--role <role>]")
+            return 1
+        role = "developer"
+        json_output = False
+        cmd_parts = []
+        i = 0
+        while i < len(args):
+            if args[i] in ["--role", "-r"] and i + 1 < len(args):
+                role = args[i + 1]
+                i += 2
+            elif args[i] == "--json":
+                json_output = True
+                i += 1
+            else:
+                cmd_parts.append(args[i])
+                i += 1
+        target_cmd = " ".join(cmd_parts)
+        res = guard.evaluate(target_cmd, role=role)
+        if json_output:
+            import json
+            print(json.dumps(res.to_dict(), indent=2))
+            return 0 if res.action != RiskLevel.BLOCK else 1
+
+        print("=" * 60)
+        print(" 🛡️  TASKCTL GUARD: COMMAND EVALUATION")
+        print("=" * 60)
+        print(f" Command : {res.command}")
+        print(f" Role    : {role}")
+        color = "\033[32m" if res.action == RiskLevel.SAFE else ("\033[33m" if res.action == RiskLevel.AUDIT else "\033[31m")
+        reset = "\033[0m"
+        print(f" Decision: {color}{res.action.value}{reset} (Score: {res.score:.2f})")
+        print(f" Latency : {res.latency_ms:.2f}ms (Fast-path: {res.fast_path})")
+        print(f" Reason  : {res.reason}")
+        print("=" * 60)
+        return 0 if res.action != RiskLevel.BLOCK else 1
+
+    elif subcmd == "test":
+        json_output = "--json" in args
+        results = guard.run_diagnostic_matrix()
+        if json_output:
+            import json
+            print(json.dumps([r.to_dict() for r in results], indent=2))
+            return 0
+        print("=" * 72)
+        print(" 🧪 TASKCTL GUARD: DIAGNOSTIC TEST MATRIX")
+        print("=" * 72)
+        print(f" {'ACTION':<7} | {'SCORE':<5} | {'LATENCY':<8} | {'ROLE':<16} | {'COMMAND'}")
+        print("-" * 72)
+        for r in results:
+            color = "\033[32m" if r.action == RiskLevel.SAFE else ("\033[33m" if r.action == RiskLevel.AUDIT else "\033[31m")
+            reset = "\033[0m"
+            print(f" {color}{r.action.value:<7}{reset} | {r.score:<5.2f} | {r.latency_ms:<6.2f}ms | {r.role:<16} | {r.command}")
+        print("=" * 72)
+        return 0
+
+    else:
+        print(f"[ERROR] Unknown guard subcommand '{subcmd}'. Available: eval, status, test")
+        return 1
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
         print(__doc__)
@@ -1396,6 +1512,20 @@ def main():
             json_output=json_output,
             analytics=analytics,
         ))
+    elif cmd == "guard":
+        if len(sys.argv) == 2:
+            subcmd = "status"
+            args = []
+        elif sys.argv[2] in ["-h", "--help", "help"]:
+            print("Usage: taskctl guard [eval|status|test] [options]")
+            print("  taskctl guard status [--json]")
+            print("  taskctl guard eval <cmd> [--role <role>] [--json]")
+            print("  taskctl guard test [--json]")
+            sys.exit(0)
+        else:
+            subcmd = sys.argv[2].lower()
+            args = sys.argv[3:]
+        sys.exit(cmd_guard(subcmd, args))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)
