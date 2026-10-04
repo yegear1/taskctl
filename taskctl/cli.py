@@ -1176,8 +1176,19 @@ def cmd_guard(subcmd: str, args: List[str]) -> int:
         print("=" * 72)
         return 0
 
+    elif subcmd in ["monitor", "live"]:
+        from scripts.aether_guard import cmd_monitor
+        import argparse
+        m_args = argparse.Namespace(
+            config=None,
+            file=None,
+            lines=15,
+            once="--once" in args,
+        )
+        return cmd_monitor(m_args)
+
     else:
-        print(f"[ERROR] Unknown guard subcommand '{subcmd}'. Available: eval, status, test")
+        print(f"[ERROR] Unknown guard subcommand '{subcmd}'. Available: eval, status, test, live")
         return 1
 
 def main():
