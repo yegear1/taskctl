@@ -15,7 +15,9 @@ It provides a deterministic bridge between AI coding agents (Antigravity, Claude
   - `0`: **APPROVED** — Ready for completion.
   - `1`: **CHANGES REQUIRED** — Actionable corrections needed.
   - `2`: **REJECTED** — Critical policy violation; escalates to planner/human.
-- **📡 Non-Blocking Telemetry:** Background webhook dispatcher with timeouts and circuit-breaker isolation, ensuring network drops never abort commits or developer workflows.
+- **✅ Conventional Commits (`taskctl lint-commit`):** Hermetic commit-message policy for `commit-msg` hooks and CI, with no external linter dependency.
+- **📡 Non-Blocking Telemetry:** Background webhook and Vector sinks. Network drops, invalid endpoints, and timeouts never abort commits or status updates.
+- **📈 Dependency Graph & Tracing:** `taskctl graph` (ASCII, Mermaid, JSON, cycle check) and `taskctl trace` (W3C-style spans and SLA duration alerts).
 - **🔌 Pluggable Provider Adapters:** Native support for external platforms such as Maestri spatial canvases and [`multigravity-cli`](https://github.com/yegear1/multigravity-cli) for quota-aware profile routing.
 - **🌐 Open & Decoupled Architecture:** `taskctl` strictly governs task contracts and lifecycle states. It leaves multi-profile quota tracking and worktree balancing to external tools like `multigravity-cli` without hard dependencies.
 - **🌿 Greenfield & Brownfield Compliance:** 100% compliant with the `ye-sandbox/template-agent` governance and Markdown AST specification.
@@ -48,14 +50,21 @@ taskctl --help
 | :--- | :--- |
 | `taskctl init` | Initialize `.agent/TASK.md` and `AGENTS.md` in the current repository. |
 | `taskctl status` | Display the active task, acceptance criteria, git status, and quota route. |
+| `taskctl backlog` | List upcoming backlog items. |
 | `taskctl plan "<prompt>"` | Request planner decomposition of upcoming tasks into `.agent/TASK.md`. |
-| `taskctl next [--weight]` | Promote the next backlog task to `RUNNING` status and notify agent. |
-| `taskctl audit` | Run Scope Auditor verification on staged diffs and git hygiene. |
-| `taskctl done [message]` | Validate DoD, generate feature commit + governance log commit, and dispatch webhook. |
-| `taskctl sync` | Sync active `.agent/TASK.md` status to Maestri canvas cockpit note. |
-| `taskctl quota` | Inspect real-time Multigravity profile quotas and balancing recommendation. |
-| `taskctl ws [name]` | Provision and wire a Maestri workspace for the current repository. |
-| `taskctl notify <msg>` | Dispatch an ad-hoc event via configured webhook. |
+| `taskctl next [light\|medium\|heavy] [--agent <name>] [--no-handoff]` | Promote the next backlog task to `RUNNING` and hand off to the builder. |
+| `taskctl audit [--delegate] [--agent <name>]` | Run Scope Auditor on staged diffs and git hygiene. Exit `0` / `1` / `2`. |
+| `taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>]` | Validate a message against Conventional Commits. Alias: `commit-lint`. |
+| `taskctl done [message] [-p] [--agent <name>] [--no-handoff]` | Validate DoD, create the feature commit and the governance commit, dispatch webhook. |
+| `taskctl graph [--mermaid\|--json\|--check-cycles] [--file <path>]` | Render the task dependency DAG. Exit `1` when a cycle is found. |
+| `taskctl dashboard [--snapshot] [--split] [--dag]` | Terminal view of the active task, DoD, and audit. Alias: `tui`. |
+| `taskctl trace [--last] [--id <trace_id>] [--analytics] [--json]` | Show trace spans, a waterfall, and SLA duration metrics. |
+| `taskctl daemon [--watch <path>] [--once] [--json]` | Poll watched repos and broadcast lifecycle events. |
+| `taskctl broadcast [msg] [--watch <path>] [--json]` | Send one cross-repo status roll-up to Vector, canvas, and webhook. |
+| `taskctl sync [--pull]` | Push or pull the active task note on the Maestri canvas. |
+| `taskctl quota` | Inspect Multigravity profile quotas and the balancing recommendation. |
+| `taskctl ws [name] [--preset <name>] [--workers <n>]` | Provision a Maestri workspace. Presets: `trinity`, `swarm`, `audit`. |
+| `taskctl notify <msg>` | Dispatch an ad-hoc event via the configured webhook. |
 
 ---
 
@@ -74,21 +83,13 @@ taskctl/
 ├── AGENTS.md                # Agent directives & DoD standards
 ├── pyproject.toml           # PEP 517/518/621 packaging
 ├── taskctl/
-│   ├── __init__.py          # Package metadata
-│   ├── cli.py               # CLI entrypoint & subcommands
-│   ├── core/
-│   │   ├── __init__.py
-│   │   └── parser.py        # Strict Markdown parser & serializer
-│   ├── providers/
-│   │   ├── __init__.py
-│   │   ├── maestri.py       # Maestri canvas IPC adapter
-│   │   └── multigravity.py  # Multigravity quota routing adapter
-│   └── webhooks/
-│       ├── __init__.py
-│       └── dispatcher.py    # Non-blocking telemetry event dispatcher
-└── tests/                   # Hermetic automated test suite
-    ├── test_parser.py
-    └── test_webhooks.py
+│   ├── cli.py               # CLI entrypoint and subcommands
+│   ├── core/                # Parser, scope auditor, commits, dependency graph
+│   ├── providers/           # Maestri IPC and multigravity quota adapters
+│   ├── telemetry/           # Vector sink, cross-repo daemon, tracing
+│   ├── tui/                 # Terminal dashboard
+│   └── webhooks/            # Non-blocking lifecycle event dispatcher
+└── tests/                   # Hermetic suite (parser, audit, graph, telemetry, TUI)
 ```
 
 ---
@@ -107,6 +108,8 @@ python3 -m unittest discover tests
 # Git cleanliness check
 git diff --check
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the same gates on Python 3.10–3.13, plus `taskctl audit` and `taskctl lint-commit`.
 
 ---
 

@@ -6,7 +6,7 @@ description: Author, test, and maintain CLI subcommands in taskctl with strict a
 # CLI Command Authoring & Maintenance
 
 ## 1. Context and Objective
-`taskctl` provides the developer and agent interface for lifecycle management (`init`, `status`, `plan`, `next`, `audit`, `done`). Every command must adhere to strict typing, deterministic exit codes, and fail-safe side effects.
+`taskctl` provides the developer and agent interface for lifecycle management (`init`, `status`, `backlog`, `plan`, `next`, `audit`, `lint-commit`, `done`, `graph`, `dashboard`, `trace`, `daemon`, `broadcast`, `sync`, `quota`, `ws`, `notify`). Every command must adhere to strict typing, deterministic exit codes, and fail-safe side effects.
 
 ---
 
