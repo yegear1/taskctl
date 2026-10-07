@@ -29,6 +29,9 @@ __all__ = [
     "get_tracer",
     "DurationAnalyzer",
     "TracingAlertPolicy",
+    "SessionTokenRecord",
+    "RoleTokenAggregation",
+    "collect_token_telemetry",
 ]
 
 
@@ -49,5 +52,11 @@ def __getattr__(name: str):
     ):
         from taskctl.telemetry import tracing
         return getattr(tracing, name)
+    if name in (
+        "SessionTokenRecord",
+        "RoleTokenAggregation",
+        "collect_token_telemetry",
+    ):
+        from taskctl.telemetry import tokens
+        return getattr(tokens, name)
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
-

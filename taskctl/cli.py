@@ -39,9 +39,9 @@ Commands:
                            workspaces and broadcast live events to Vector, Canvas, and Webhooks.
   taskctl broadcast [msg] [--watch <path>...] [--json]
                            Aggregate cross-repo status roll-up and broadcast to configured sinks.
-  taskctl trace [--last] [--id <trace_id>] [--json] [--analytics]
-                           Display distributed trace spans, waterfall tree, and SLA duration metrics.
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
+  taskctl tokens [--profile <p>] [--role <r>] [--repo <path>] [--json] [--detailed]
+                           Aggregate multi-agent token consumption partitioned by Profile and Role.
   taskctl guard [eval|status|test]
                            Inspect guardrail status, evaluate commands against active policy,
                            and run diagnostic test matrix for terminal interception.
@@ -53,6 +53,7 @@ import sys
 if __package__ is None or __package__ == "":
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import json
 import re
 import shutil
 import subprocess
@@ -1191,6 +1192,101 @@ def cmd_guard(subcmd: str, args: List[str]) -> int:
         print(f"[ERROR] Unknown guard subcommand '{subcmd}'. Available: eval, status, test, live")
         return 1
 
+
+def cmd_tokens(
+    profile: Optional[str] = None,
+    role: Optional[str] = None,
+    repo: Optional[str] = None,
+    json_output: bool = False,
+    detailed: bool = False,
+    limit: int = 100,
+) -> int:
+    """Aggregate multi-agent token consumption partitioned by Profile and Role."""
+    from taskctl.telemetry.tokens import collect_token_telemetry
+
+    sessions, aggregations = collect_token_telemetry(
+        profile_filter=profile,
+        role_filter=role,
+        repo_filter=repo,
+        search_limit_per_profile=limit,
+    )
+
+    if json_output:
+        tot_prompt = sum(a.prompt_tokens for a in aggregations)
+        tot_comp = sum(a.completion_tokens for a in aggregations)
+        tot_think = sum(a.thinking_tokens for a in aggregations)
+        tot_tokens = sum(a.total_tokens for a in aggregations)
+        tot_turns = sum(a.turns for a in aggregations)
+        tot_tools = sum(a.tool_calls for a in aggregations)
+        payload: Dict[str, Any] = {
+            "summary": {
+                "total_profiles": len(set(a.profile for a in aggregations)),
+                "total_roles": len(aggregations),
+                "total_sessions": len(sessions),
+                "prompt_tokens": tot_prompt,
+                "completion_tokens": tot_comp,
+                "thinking_tokens": tot_think,
+                "total_tokens": tot_tokens,
+                "turns": tot_turns,
+                "tool_calls": tot_tools,
+            },
+            "aggregations": [a.to_dict() for a in aggregations],
+        }
+        if detailed:
+            payload["sessions"] = [s.to_dict() for s in sessions]
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if not aggregations:
+        print("\n[INFO] No token telemetry or agent sessions found.")
+        if profile or role or repo:
+            print(f"       Filters: profile={profile}, role={role}, repo={repo}")
+        return 0
+
+    print("\n" + "=" * 115)
+    print(" 📊 MULTI-AGENT TOKEN CONSUMPTION TELEMETRY (PROFILE & ROLE BREAKDOWN)")
+    print("=" * 115)
+    print(f" {'PROFILE':<11} | {'ROLE':<18} | {'AGENT':<6} | {'SESS':<5} | {'TURNS':<6} | {'TOOLS':<6} | {'PROMPT TOK':>12} | {'OUTPUT TOK':>12} | {'TOTAL TOK':>12} | {'LAST ACTIVE'}")
+    print("-" * 115)
+
+    tot_sess = 0
+    tot_turns = 0
+    tot_tools = 0
+    tot_prompt = 0
+    tot_comp = 0
+    tot_tokens = 0
+
+    for a in aggregations:
+        tot_sess += a.sessions_count
+        tot_turns += a.turns
+        tot_tools += a.tool_calls
+        tot_prompt += a.prompt_tokens
+        tot_comp += a.completion_tokens
+        tot_tokens += a.total_tokens
+        last_str = a.last_active or "N/A"
+        if len(last_str) > 20:
+            last_str = last_str[:19] + "Z"
+        print(f" {a.profile:<11} | {a.role:<18} | {a.agent_type:<6} | {a.sessions_count:<5} | {a.turns:<6} | {a.tool_calls:<6} | {a.prompt_tokens:>12,} | {a.completion_tokens:>12,} | {a.total_tokens:>12,} | {last_str}")
+
+    print("-" * 115)
+    print(f" {'TOTAL':<11} | {'':<18} | {'':<6} | {tot_sess:<5} | {tot_turns:<6} | {tot_tools:<6} | {tot_prompt:>12,} | {tot_comp:>12,} | {tot_tokens:>12,} |")
+    print("=" * 115)
+
+    if detailed and sessions:
+        print("\n" + "-" * 115)
+        print(" 🔍 DETAILED INDIVIDUAL SESSIONS")
+        print("-" * 115)
+        for s in sessions[:30]:
+            print(f" • [{s.profile}:{s.role}] {s.session_id} ({s.agent_type}): {s.total_tokens:,} tokens ({s.turns} turns, {s.tool_calls} tools)")
+        if len(sessions) > 30:
+            print(f"   ... and {len(sessions) - 30} more sessions.")
+        print("-" * 115 + "\n")
+    else:
+        print()
+
+    return 0
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
         print(__doc__)
@@ -1537,6 +1633,53 @@ def main():
             subcmd = sys.argv[2].lower()
             args = sys.argv[3:]
         sys.exit(cmd_guard(subcmd, args))
+    elif cmd in ["tokens", "token"]:
+        profile = None
+        role = None
+        repo = None
+        json_output = False
+        detailed = False
+        limit = 100
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--profile", "-p"] and i + 1 < len(args):
+                profile = args[i + 1]
+                i += 2
+            elif args[i] in ["--role", "-r"] and i + 1 < len(args):
+                role = args[i + 1]
+                i += 2
+            elif args[i] in ["--repo"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
+            elif args[i] in ["--limit", "-l"] and i + 1 < len(args):
+                try:
+                    limit = int(args[i + 1])
+                except ValueError:
+                    limit = 100
+                i += 2
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["--detailed", "-d"]:
+                detailed = True
+                i += 1
+            elif not args[i].startswith("-") and profile is None:
+                profile = args[i]
+                i += 1
+            elif not args[i].startswith("-") and role is None:
+                role = args[i]
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_tokens(
+            profile=profile,
+            role=role,
+            repo=repo,
+            json_output=json_output,
+            detailed=detailed,
+            limit=limit,
+        ))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)

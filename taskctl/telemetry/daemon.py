@@ -70,10 +70,35 @@ class TelemetryDaemon:
         lines.append("==========================================================================================")
         return "\n".join(lines)
 
+    def refresh_tokens(self) -> Optional[Dict[str, Any]]:
+        """Collect latest token usage, update cache and emit token telemetry event."""
+        try:
+            from taskctl.telemetry.tokens import collect_token_telemetry
+            from taskctl.telemetry.events import TelemetryEvent
+            sessions, aggs = collect_token_telemetry(search_limit_per_profile=100, save_cache=True)
+            tot_tokens = sum(a.total_tokens for a in aggs)
+            if self.broadcaster.broadcast_vector and aggs:
+                event = TelemetryEvent(
+                    message=f"[TOKENS] Refreshed multi-agent token telemetry: {tot_tokens:,} tokens across {len(aggs)} role groups",
+                    level="info",
+                    event_type="token_telemetry_summary",
+                    details={
+                        "total_tokens": tot_tokens,
+                        "total_sessions": len(sessions),
+                        "role_groups": len(aggs),
+                        "aggregations": [a.to_dict() for a in aggs],
+                    },
+                )
+                self.broadcaster.emitter.emit(event)
+            return {"total_tokens": tot_tokens, "aggregations": len(aggs)}
+        except Exception:
+            return None
+
     def run_once(self) -> Dict[str, Any]:
         """Execute a single aggregation sweep, broadcast summary, print output, and return."""
         summary = self.aggregator.get_summary()
         self.broadcaster.broadcast_summary(summary)
+        self.refresh_tokens()
 
         if self.output_format == "json":
             print(json.dumps(summary, indent=2))
@@ -125,11 +150,12 @@ class TelemetryDaemon:
                     # Broadcast event to configured sinks
                     self.broadcaster.broadcast_event(event)
 
-                # Periodic roll-up summary
+                # Periodic roll-up summary & token cache refresh
                 now = time.time()
                 if now - self._last_summary_time >= self.summary_interval:
                     summary = self.aggregator.get_summary()
                     self.broadcaster.broadcast_summary(summary)
+                    self.refresh_tokens()
                     self._last_summary_time = now
 
                 # Sleep in small slices to remain interruptible
