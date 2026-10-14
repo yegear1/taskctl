@@ -84,6 +84,11 @@
 - **Decision:** Implement `resolve_repo_path(repo, base_dir)` in `taskctl.core.parser` supporting absolute paths, relative paths, current repo basename, sibling directories, and `TASKCTL_WATCH_REPOS` environment variable. Wire `--repo <path|name>` flag across `taskctl` commands (`status`, `plan`, `next`, `audit`, `done`). Ensure all Git invocations and file mutations execute hermetically in `cwd=target_repo`.
 - **Consequences:** Safe multi-repo orchestration, remote worktree auditing, and double atomic commits without cross-repo pollution or directory context drift.
 
+### 2026-10-14 Decoupled Profiles & Dynamic Multigravity Routing
+- **Context:** `taskctl.providers.multigravity` had a hardcoded `MULTIGRAVITY_PROFILES` list and assumed a flat mock bucket schema, preventing discovery of newly added IDE profiles or consuming production nested quota structures.
+- **Decision:** Implement `discover_profiles()` checking `TASKCTL_MULTIGRAVITY_PROFILES`, `multigravity list --json`, with fallback to `DEFAULT_PROFILES`. Normalize both flat buckets and rich Antigravity `data.response.groups`. Support dynamic routing via `query_multigravity_route()` (`multigravity route --json`) falling back to local quota-based dynamic calculation.
+- **Consequences:** Turn-key integration with dynamic multi-profile environments; zero hardcoded profile coupling; full backward compatibility.
+
 ---
 
 ## Active Contracts
