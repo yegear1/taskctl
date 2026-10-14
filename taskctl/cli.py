@@ -12,9 +12,9 @@ Commands:
   taskctl quota            Display real-time Multigravity quota across all profiles.
   taskctl plan "<prompt>" [--repo <path|name>]
                            Ask the Planner agent to decompose tasks into .agent/TASK.md.
-  taskctl next [--weight] [--agent <name>] [--no-handoff] [--repo <path|name>]
+  taskctl next [--weight] [--agent <name>] [--no-handoff] [--repo <path|name>] [--runner <name>]
                            Promote next backlog task to active (RUNNING) and dispatch
-                           lifecycle hand-off context to Builder agent.
+                           lifecycle hand-off or runner execution (maestri, multigravity, codex, custom).
   taskctl audit [--delegate] [--agent <name>] [--domain-lint] [--repo <path|name>]
                            Trigger Scope Auditor to verify diff with optional canvas
                            agent delegation fallback. --domain-lint (or
@@ -23,7 +23,7 @@ Commands:
                              0: [APPROVED] - Ready for taskctl done.
                              1: [CHANGES REQUIRED] - Prints Required Action for auto-remediation.
                              2: [REJECTED] - Critical failure; escalates to Planner/human.
-  taskctl done [msg] [-p] [--agent <name>] [--no-handoff] [--repo <path|name>]
+  taskctl done [msg] [-p] [--agent <name>] [--no-handoff] [--repo <path|name>] [--runner <name>]
                            Validate DoD, create double atomic commit (code + governance),
                            dispatch completion hand-off to Auditor/Planner, and trigger webhooks.
   taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>] [--head]
@@ -96,6 +96,7 @@ from taskctl.telemetry import (
     Span,
     DurationAnalyzer,
 )
+from taskctl.runners import get_runner, list_runners, RunnerResult
 from taskctl.tui import Dashboard
 
 def run_cmd(cmd_str: str, check: bool = False, capture: bool = True, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
@@ -331,6 +332,7 @@ def cmd_next(
     target_agent: Optional[str] = None,
     handoff: bool = True,
     repo: Optional[str] = None,
+    runner: Optional[str] = None,
 ):
     try:
         repo_root = resolve_repo_path(repo)
@@ -433,15 +435,51 @@ def cmd_next(
                 "runtime_target": f"Profile '{best_profile}' | Model: '{best_model}'",
                 "repo": repo_name,
                 "repo_path": repo_root,
+                "weight": weight,
             }
-            with tracer.start_span("provider.handoff_start", tags={"task_id": next_id, "repo": repo_name}):
-                h_res = handoff_task_start(task_data, target_agent=target_agent)
-            if h_res.delivered:
-                print(f"[Hand-off] Successfully dispatched context to canvas agent '{h_res.target_agent}'.")
-                if h_res.response:
-                    print(f"            Response: {h_res.response}")
+
+            try:
+                runner_instance = get_runner(runner)
+            except ValueError as e:
+                print(f"[ERROR] {e}")
+                sys.exit(1)
+
+            with tracer.start_span("runner.execute", tags={"runner": runner_instance.name, "task_id": next_id, "repo": repo_name}) as runner_span:
+                r_res = runner_instance.run(task_data, target_agent=target_agent, weight=weight)
+
+            get_telemetry_emitter().emit_lifecycle_event(
+                event_type="runner_dispatched",
+                task_id=next_id,
+                message=f"Task [{next_id}] dispatched via {runner_instance.name} runner: {r_res.status}",
+                status="RUNNING",
+                trace_id=runner_span.trace_id,
+                span_id=runner_span.span_id,
+                parent_span_id=runner_span.parent_span_id,
+                details={
+                    "runner": runner_instance.name,
+                    "status": r_res.status,
+                    "delivered": r_res.delivered,
+                    "target": r_res.target,
+                    "error": r_res.error,
+                    "repo": repo_name,
+                    "repo_path": repo_root,
+                },
+            )
+
+            if runner_instance.name == "maestri":
+                if r_res.delivered:
+                    print(f"[Hand-off] Successfully dispatched context to canvas agent '{r_res.target}'.")
+                    if r_res.output:
+                        print(f"            Response: {r_res.output}")
+                else:
+                    print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
             else:
-                print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
+                status_str = r_res.status.upper()
+                print(f"[Runner:{runner_instance.name}] Status: {status_str} | Target: {r_res.target or 'N/A'}")
+                if r_res.output:
+                    print(f"            Output: {r_res.output}")
+                if r_res.error:
+                    print(f"            Notice: {r_res.error}")
 
 def cmd_audit(
     delegate: bool = False,
@@ -684,6 +722,7 @@ def cmd_done(
     target_agent: Optional[str] = None,
     handoff: bool = True,
     repo: Optional[str] = None,
+    runner: Optional[str] = None,
 ):
     try:
         repo_root = resolve_repo_path(repo)
@@ -812,7 +851,10 @@ def cmd_done(
                 print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
 
     if promote:
-        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
+        if runner is not None:
+            cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo, runner=runner)
+        else:
+            cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
 
 def cmd_backlog():
     task_file = get_task_file()
@@ -1437,6 +1479,7 @@ def main():
         target_agent = None
         handoff = True
         repo = None
+        runner = None
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -1452,12 +1495,18 @@ def main():
             elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
                 repo = args[i + 1]
                 i += 2
+            elif args[i] in ["--runner", "-R"] and i + 1 < len(args):
+                runner = args[i + 1]
+                i += 2
             elif args[i] in ["--no-handoff", "--skip-handoff"]:
                 handoff = False
                 i += 1
             else:
                 i += 1
-        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
+        if runner is not None:
+            cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo, runner=runner)
+        else:
+            cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
     elif cmd == "audit":
         delegate = False
         agent_name = None
@@ -1489,6 +1538,7 @@ def main():
         handoff = True
         weight = "medium"
         repo = None
+        runner = None
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -1501,6 +1551,9 @@ def main():
             elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
                 repo = args[i + 1]
                 i += 2
+            elif args[i] in ["--runner", "-R"] and i + 1 < len(args):
+                runner = args[i + 1]
+                i += 2
             elif args[i] in ["--no-handoff", "--skip-handoff"]:
                 handoff = False
                 i += 1
@@ -1512,7 +1565,10 @@ def main():
                 i += 1
             else:
                 i += 1
-        cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
+        if runner is not None:
+            cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff, repo=repo, runner=runner)
+        else:
+            cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
     elif cmd == "sync":
         pull = "--pull" in sys.argv[2:]
         cmd_sync(pull=pull)

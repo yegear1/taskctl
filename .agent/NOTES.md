@@ -89,6 +89,11 @@
 - **Decision:** Implement `discover_profiles()` checking `TASKCTL_MULTIGRAVITY_PROFILES`, `multigravity list --json`, with fallback to `DEFAULT_PROFILES`. Normalize both flat buckets and rich Antigravity `data.response.groups`. Support dynamic routing via `query_multigravity_route()` (`multigravity route --json`) falling back to local quota-based dynamic calculation.
 - **Consequences:** Turn-key integration with dynamic multi-profile environments; zero hardcoded profile coupling; full backward compatibility.
 
+### 2026-10-14 Abstract Runner Layer & Pluggable Runner Adapters
+- **Context:** `taskctl next` execution and dispatch was hardcoded to Maestri canvas agent hand-offs, preventing execution in headless worktrees, direct Multigravity execution, OpenAI Codex agent runners, or custom script commands.
+- **Decision:** Implement abstract `TaskRunner` base class, structured `RunnerResult`, and pluggable registry in `taskctl.runners`. Built-in adapters support `maestri` (canvas hand-off with offline fallback), `multigravity` (profile worktree dispatch), `codex` (headless agent CLI), and `custom` (template command interpolation via `TASKCTL_RUNNER_COMMAND`). Support `--runner` (`-R`) flag in `taskctl next` and `taskctl done --promote`, falling back to `TASKCTL_DEFAULT_RUNNER` or defaulting to `maestri`.
+- **Consequences:** Extensible multi-agent execution with zero vendor lock-in; complete backward compatibility with existing canvas workflows.
+
 ---
 
 ## Active Contracts
@@ -104,6 +109,7 @@
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | Generic JSON `taskctl/schemas/v1/webhook-event.schema.json` v1.0.0; Discord and Slack adapters are separate |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs JSON (`taskctl/schemas/v1/vector-event.schema.json` v1.0.0) |
 | `MaestriIPCClient` / CLI | `taskctl` | Maestri Spatial Canvas | JSON-RPC / CLI notes & workspace commands |
+| `TaskRunner` Registry | `taskctl next` / `done -p` | Maestri / Multigravity / Codex / Custom | Pluggable runner execution, structured `RunnerResult`, trace span `runner.execute` |
 
 ---
 
