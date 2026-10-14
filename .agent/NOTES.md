@@ -79,6 +79,11 @@
 - **Decision:** Implement W3C-compatible `TraceContext`, `Span`, `Tracer`, and `DurationAnalyzer` in `taskctl.telemetry.tracing`, auto-enriching `TelemetryEvent` and `VectorSink` payloads with `trace_id`, `span_id`, and `parent_span_id`, while triggering fail-safe `sla_alert` events on threshold breach (`taskctl trace`).
 - **Consequences:** Deterministic distributed tracing and SLA alerting across all CLI subcommands and agent hand-offs with zero third-party dependencies.
 
+### 2026-10-14 Multi-Repository Context Firewall & Remote Worktree Auditing
+- **Context:** Managing task lifecycles, plans, scope audits, and atomic commits across distributed satellite repositories without requiring callers to manually change working directories or risk polluting the calling workspace.
+- **Decision:** Implement `resolve_repo_path(repo, base_dir)` in `taskctl.core.parser` supporting absolute paths, relative paths, current repo basename, sibling directories, and `TASKCTL_WATCH_REPOS` environment variable. Wire `--repo <path|name>` flag across `taskctl` commands (`status`, `plan`, `next`, `audit`, `done`). Ensure all Git invocations and file mutations execute hermetically in `cwd=target_repo`.
+- **Consequences:** Safe multi-repo orchestration, remote worktree auditing, and double atomic commits without cross-repo pollution or directory context drift.
+
 ---
 
 ## Active Contracts

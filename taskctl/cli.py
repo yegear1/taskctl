@@ -7,13 +7,15 @@ Commands:
                            Create and wire Maestri workspace for current repo with
                            optional multi-agent topology preset (trinity, swarm, audit).
   taskctl init             Initialize .agent/TASK.md and AGENTS.md in current repository.
-  taskctl status           Show active task, criteria, git status, and quota route.
+  taskctl status [--repo <path|name>]
+                           Show active task, criteria, git status, and quota route.
   taskctl quota            Display real-time Multigravity quota across all profiles.
-  taskctl plan "<prompt>"  Ask the Planner agent to decompose tasks into .agent/TASK.md.
-  taskctl next [--weight] [--agent <name>] [--no-handoff]
+  taskctl plan "<prompt>" [--repo <path|name>]
+                           Ask the Planner agent to decompose tasks into .agent/TASK.md.
+  taskctl next [--weight] [--agent <name>] [--no-handoff] [--repo <path|name>]
                            Promote next backlog task to active (RUNNING) and dispatch
                            lifecycle hand-off context to Builder agent.
-  taskctl audit [--delegate] [--agent <name>] [--domain-lint]
+  taskctl audit [--delegate] [--agent <name>] [--domain-lint] [--repo <path|name>]
                            Trigger Scope Auditor to verify diff with optional canvas
                            agent delegation fallback. --domain-lint (or
                            TASKCTL_DOMAIN_LINT=1) also checks acceptance criteria.
@@ -21,7 +23,7 @@ Commands:
                              0: [APPROVED] - Ready for taskctl done.
                              1: [CHANGES REQUIRED] - Prints Required Action for auto-remediation.
                              2: [REJECTED] - Critical failure; escalates to Planner/human.
-  taskctl done [msg] [-p] [--agent <name>] [--no-handoff]
+  taskctl done [msg] [-p] [--agent <name>] [--no-handoff] [--repo <path|name>]
                            Validate DoD, create double atomic commit (code + governance),
                            dispatch completion hand-off to Auditor/Planner, and trigger webhooks.
   taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>] [--head]
@@ -61,7 +63,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md
+from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md, resolve_repo_path
 from taskctl.core.auditor import ScopeAuditor, AuditSeverity, domain_lint_enabled
 from taskctl.core.commits import parse_conventional_commit
 from taskctl.providers.multigravity import get_profile_quotas, route_target
@@ -96,13 +98,14 @@ from taskctl.telemetry import (
 )
 from taskctl.tui import Dashboard
 
-def run_cmd(cmd_str: str, check: bool = False, capture: bool = True) -> subprocess.CompletedProcess:
+def run_cmd(cmd_str: str, check: bool = False, capture: bool = True, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd_str,
         shell=True,
         text=True,
         capture_output=capture,
         check=check,
+        cwd=cwd,
     )
 
 def cmd_init():
@@ -165,9 +168,10 @@ def cmd_init():
     else:
         print(f"[OK] Repository in {root} already has .agent/TASK.md and AGENTS.md.")
 
-def cmd_status():
+def cmd_status(repo: Optional[str] = None):
     try:
-        task_file = get_task_file()
+        repo_root = resolve_repo_path(repo)
+        task_file = get_task_file(repo_root)
     except FileNotFoundError as e:
         print(f"[ERROR] {e}")
         sys.exit(1)
@@ -178,8 +182,12 @@ def cmd_status():
     active_task, backlog = parse_task_md(content)
 
     print("\n" + "="*50)
-    print(" 🎯 ACTIVE TASK COCKPIT")
+    repo_header = f" [{os.path.basename(repo_root)}]" if repo else ""
+    print(f" 🎯 ACTIVE TASK COCKPIT{repo_header}")
     print("="*50)
+
+    if repo:
+        print(f"Repository   : {repo_root}")
 
     if not active_task:
         print("No active task defined in .agent/TASK.md.")
@@ -201,7 +209,7 @@ def cmd_status():
     print("\n" + "="*50)
     print(" 🌿 GIT WORKBENCH STATUS")
     print("="*50)
-    git_stat = run_cmd("git status -s").stdout.strip()
+    git_stat = run_cmd("git status -s", cwd=repo_root).stdout.strip()
     if git_stat:
         print(git_stat)
     else:
@@ -318,8 +326,19 @@ def cmd_quota():
     print(f"Optimal Allocation: Profile '{best_p}' -> {best_m}")
     print(f"Reason: {reason}\n")
 
-def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff: bool = True):
-    task_file = get_task_file()
+def cmd_next(
+    weight: str = "medium",
+    target_agent: Optional[str] = None,
+    handoff: bool = True,
+    repo: Optional[str] = None,
+):
+    try:
+        repo_root = resolve_repo_path(repo)
+        task_file = get_task_file(repo_root)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        sys.exit(1)
+
     with open(task_file, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -335,7 +354,8 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
     next_title = next_item["title"]
 
     tracer = get_tracer()
-    with tracer.start_span("cli.next", tags={"task_id": next_id, "weight": weight}) as root_span:
+    repo_name = os.path.basename(repo_root)
+    with tracer.start_span("cli.next", tags={"task_id": next_id, "weight": weight, "repo": repo_name}) as root_span:
         best_profile, best_model, _ = route_target(weight=weight)
 
         updated = content
@@ -362,7 +382,8 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
         with open(task_file, "w", encoding="utf-8") as f:
             f.write(updated)
 
-        print(f"\n[OK] Promoted [{next_id}] '{next_title}' to Active Task (Status: RUNNING).")
+        repo_prefix = f"[{repo_name}] " if repo else ""
+        print(f"\n[OK] {repo_prefix}Promoted [{next_id}] '{next_title}' to Active Task (Status: RUNNING).")
         print(f"[Quota Route] Profile: {best_profile} | Model: {best_model} (Weight: {weight})")
 
         sync_task_cockpit_note(updated)
@@ -373,7 +394,11 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
             task_id=next_id,
             title=next_title,
             status="RUNNING",
-            details={"actor": f"{best_profile} ({best_model})"}
+            details={
+                "actor": f"{best_profile} ({best_model})",
+                "repo": repo_name,
+                "repo_path": repo_root,
+            }
         )
 
         get_telemetry_emitter().emit_lifecycle_event(
@@ -389,6 +414,8 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
                 "weight": weight,
                 "profile": best_profile,
                 "model": best_model,
+                "repo": repo_name,
+                "repo_path": repo_root,
             },
         )
 
@@ -404,8 +431,10 @@ def cmd_next(weight: str = "medium", target_agent: Optional[str] = None, handoff
                 "systems": promoted_active.get("systems", "") if promoted_active else "",
                 "criteria": promoted_active.get("criteria", []) if promoted_active else [],
                 "runtime_target": f"Profile '{best_profile}' | Model: '{best_model}'",
+                "repo": repo_name,
+                "repo_path": repo_root,
             }
-            with tracer.start_span("provider.handoff_start", tags={"task_id": next_id}):
+            with tracer.start_span("provider.handoff_start", tags={"task_id": next_id, "repo": repo_name}):
                 h_res = handoff_task_start(task_data, target_agent=target_agent)
             if h_res.delivered:
                 print(f"[Hand-off] Successfully dispatched context to canvas agent '{h_res.target_agent}'.")
@@ -418,10 +447,17 @@ def cmd_audit(
     delegate: bool = False,
     agent_name: Optional[str] = None,
     domain_lint: bool = False,
+    repo: Optional[str] = None,
 ) -> int:
     from pathlib import Path
-    repo_path = Path(find_repo_root())
-    task_file = get_task_file()
+    try:
+        repo_root = resolve_repo_path(repo)
+        repo_path = Path(repo_root)
+        task_file = get_task_file(repo_root)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        return 1
+
     active_task = {"id": "XX.Y", "title": "Ad-hoc task"}
     if os.path.exists(task_file):
         try:
@@ -432,11 +468,14 @@ def cmd_audit(
             pass
 
     tracer = get_tracer()
-    with tracer.start_span("cli.audit", tags={"task_id": active_task.get("id", "XX.Y"), "hybrid": delegate}) as root_span:
+    with tracer.start_span("cli.audit", tags={"task_id": active_task.get("id", "XX.Y"), "hybrid": delegate, "repo": repo_path.name}) as root_span:
         mode_label = f" [HYBRID / DELEGATED to {agent_name or 'Auditor'}]" if delegate else ""
+        repo_label = f" [{repo_path.name}]" if repo else ""
         print("\n" + "="*58)
-        print(f" 🛡️ SCOPE AUDITOR VERIFICATION{mode_label}")
+        print(f" 🛡️ SCOPE AUDITOR VERIFICATION{repo_label}{mode_label}")
         print("="*58)
+        if repo:
+            print(f" Repository   : {repo_path}")
 
         start_audit = time.perf_counter()
         domain_lint_on = domain_lint_enabled(domain_lint)
@@ -476,6 +515,8 @@ def cmd_audit(
                 "rule_count": len(verdict.results),
                 "hybrid": delegate,
                 "agent": agent_name,
+                "repo": repo_path.name,
+                "repo_path": str(repo_path),
                 "rules": [
                     {
                         "rule": r.rule_name,
@@ -502,6 +543,8 @@ def cmd_audit(
                 "rule_count": len(verdict.results),
                 "hybrid": delegate,
                 "agent": agent_name,
+                "repo": repo_path.name,
+                "repo_path": str(repo_path),
                 "rules": [
                     {
                         "rule": r.rule_name,
@@ -640,8 +683,15 @@ def cmd_done(
     notify_planner: bool = True,
     target_agent: Optional[str] = None,
     handoff: bool = True,
+    repo: Optional[str] = None,
 ):
-    task_file = get_task_file()
+    try:
+        repo_root = resolve_repo_path(repo)
+        task_file = get_task_file(repo_root)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        sys.exit(1)
+
     with open(task_file, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -650,9 +700,10 @@ def cmd_done(
     title = active_task.get("title", "Ad-hoc task")
 
     tracer = get_tracer()
-    with tracer.start_span("cli.done", tags={"task_id": task_id, "promote": promote}) as root_span:
+    repo_name = os.path.basename(repo_root)
+    with tracer.start_span("cli.done", tags={"task_id": task_id, "promote": promote, "repo": repo_name}) as root_span:
         # Step 1: Feature commit
-        staged = run_cmd("git diff --cached --name-only").stdout.strip().splitlines()
+        staged = run_cmd("git diff --cached --name-only", cwd=repo_root).stdout.strip().splitlines()
         staged = [f.strip() for f in staged if f.strip() and not f.endswith(".agent/TASK.md")]
 
         commit_hash = "HEAD"
@@ -670,12 +721,12 @@ def cmd_done(
                 print("Aborting commit. Please supply a valid Conventional Commit message.\n")
                 root_span.set_status("ERROR", "Invalid commit message")
                 return
-            with tracer.start_span("git.feature_commit", tags={"task_id": task_id}):
-                run_cmd(f'git commit -m "{commit_msg}"', check=True)
-            commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
+            with tracer.start_span("git.feature_commit", tags={"task_id": task_id, "repo": repo_name}):
+                run_cmd(f'git commit -m "{commit_msg}"', check=True, cwd=repo_root)
+            commit_hash = run_cmd("git rev-parse --short HEAD", cwd=repo_root).stdout.strip()
             print(f"[COMMIT 1/2] Feature commit created: {commit_hash} - {commit_msg}")
         else:
-            commit_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
+            commit_hash = run_cmd("git rev-parse --short HEAD", cwd=repo_root).stdout.strip()
             print(f"[INFO] No staged feature changes detected; linking task [{task_id}] to commit: {commit_hash}")
 
         # Step 2: Update TASK.md completed log
@@ -702,10 +753,10 @@ def cmd_done(
             f.write(updated)
 
         gov_msg = f"docs(task): log completion of [{task_id}] and reset active task"
-        with tracer.start_span("git.governance_commit", tags={"task_id": task_id}):
-            run_cmd("git add ':(top).agent/TASK.md'", check=True)
-            run_cmd(f'git commit -m "{gov_msg}"', check=True)
-        gov_hash = run_cmd("git rev-parse --short HEAD").stdout.strip()
+        with tracer.start_span("git.governance_commit", tags={"task_id": task_id, "repo": repo_name}):
+            run_cmd("git add ':(top).agent/TASK.md'", check=True, cwd=repo_root)
+            run_cmd(f'git commit -m "{gov_msg}"', check=True, cwd=repo_root)
+        gov_hash = run_cmd("git rev-parse --short HEAD", cwd=repo_root).stdout.strip()
         print(f"[COMMIT 2/2] Governance commit created: {gov_hash}")
 
         sync_task_cockpit_note(updated)
@@ -716,7 +767,12 @@ def cmd_done(
             task_id=task_id,
             title=title,
             status="DONE",
-            details={"commit": commit_hash, "governance_commit": gov_hash}
+            details={
+                "commit": commit_hash,
+                "governance_commit": gov_hash,
+                "repo": repo_name,
+                "repo_path": repo_root,
+            }
         )
 
         get_telemetry_emitter().emit_lifecycle_event(
@@ -727,7 +783,12 @@ def cmd_done(
             trace_id=root_span.trace_id,
             span_id=root_span.span_id,
             parent_span_id=root_span.parent_span_id,
-            details={"commit": commit_hash, "governance_commit": gov_hash},
+            details={
+                "commit": commit_hash,
+                "governance_commit": gov_hash,
+                "repo": repo_name,
+                "repo_path": repo_root,
+            },
         )
 
         if handoff:
@@ -738,8 +799,10 @@ def cmd_done(
                 "commit_hash": commit_hash,
                 "governance_commit": gov_hash,
                 "notify_planner": notify_planner,
+                "repo": repo_name,
+                "repo_path": repo_root,
             }
-            with tracer.start_span("provider.handoff_done", tags={"task_id": task_id}):
+            with tracer.start_span("provider.handoff_done", tags={"task_id": task_id, "repo": repo_name}):
                 h_res = handoff_task_done(task_data, target_agent=target_agent)
             if h_res.delivered:
                 print(f"[Hand-off] Completion context dispatched to canvas agent '{h_res.target_agent}'.")
@@ -749,7 +812,7 @@ def cmd_done(
                 print(f"[Hand-off] Canvas agent hand-off skipped or degraded (agents offline).")
 
     if promote:
-        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff)
+        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
 
 def cmd_backlog():
     task_file = get_task_file()
@@ -840,8 +903,14 @@ def cmd_ws(name: Optional[str] = None, preset: Optional[str] = None, workers: in
     )
     return 0 if ok else 1
 
-def cmd_plan(prompt: str):
-    task_file = get_task_file()
+def cmd_plan(prompt: str, repo: Optional[str] = None):
+    try:
+        repo_root = resolve_repo_path(repo)
+        task_file = get_task_file(repo_root)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        sys.exit(1)
+
     with open(task_file, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -849,8 +918,11 @@ def cmd_plan(prompt: str):
     task_id = active.get("id", "XX.Y") if active else "XX.Y"
 
     print("\n" + "="*58)
-    print(" 🧭 TASK PLANNING & AGENT DELEGATION")
+    repo_label = f" [{os.path.basename(repo_root)}]" if repo else ""
+    print(f" 🧭 TASK PLANNING & AGENT DELEGATION{repo_label}")
     print("="*58)
+    if repo:
+        print(f" Repository   : {repo_root}")
     print(f" Target Task  : [{task_id}]")
     print(f" Prompt       : {prompt}")
 
@@ -883,7 +955,12 @@ def cmd_plan(prompt: str):
             task_id=task_id,
             title=active.get("title", "Ad-hoc task") if active else "Ad-hoc task",
             status="PLANNING",
-            details={"prompt": prompt, "planner_contacted": planner_resp is not None}
+            details={
+                "prompt": prompt,
+                "planner_contacted": planner_resp is not None,
+                "repo": os.path.basename(repo_root),
+                "repo_path": repo_root,
+            }
         )
 
     get_telemetry_emitter().emit_lifecycle_event(
@@ -891,7 +968,12 @@ def cmd_plan(prompt: str):
         task_id=task_id,
         message=f"Task [{task_id}] transitioned to PLANNING: {prompt}",
         status="PLANNING",
-        details={"prompt": prompt, "planner_contacted": planner_resp is not None},
+        details={
+            "prompt": prompt,
+            "planner_contacted": planner_resp is not None,
+            "repo": os.path.basename(repo_root),
+            "repo_path": repo_root,
+        },
     )
     print("="*58 + "\n")
 
@@ -1296,7 +1378,16 @@ def main():
     if cmd == "init":
         cmd_init()
     elif cmd == "status":
-        cmd_status()
+        repo = None
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        cmd_status(repo=repo)
     elif cmd == "backlog":
         cmd_backlog()
     elif cmd == "quota":
@@ -1325,34 +1416,53 @@ def main():
                 i += 1
         sys.exit(cmd_ws(name=ws_name, preset=preset, workers=workers))
     elif cmd == "plan":
-        if len(sys.argv) < 3:
-            print("[ERROR] Please provide a planning prompt: taskctl plan '<prompt>'")
+        repo = None
+        prompt_parts = []
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
+            else:
+                prompt_parts.append(args[i])
+                i += 1
+        if not prompt_parts:
+            print("[ERROR] Please provide a planning prompt: taskctl plan '<prompt>' [--repo <path|name>]")
             sys.exit(1)
-        plan_prompt = " ".join(sys.argv[2:])
-        cmd_plan(prompt=plan_prompt)
+        plan_prompt = " ".join(prompt_parts)
+        cmd_plan(prompt=plan_prompt, repo=repo)
     elif cmd == "next":
         weight = "medium"
         target_agent = None
         handoff = True
+        repo = None
         args = sys.argv[2:]
         i = 0
         while i < len(args):
             if args[i] in ["light", "medium", "heavy"]:
                 weight = args[i]
                 i += 1
+            elif args[i] in ["--weight", "-w"] and i + 1 < len(args):
+                weight = args[i + 1]
+                i += 2
             elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
                 target_agent = args[i + 1]
+                i += 2
+            elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
                 i += 2
             elif args[i] in ["--no-handoff", "--skip-handoff"]:
                 handoff = False
                 i += 1
             else:
                 i += 1
-        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff)
+        cmd_next(weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
     elif cmd == "audit":
         delegate = False
         agent_name = None
         domain_lint = False
+        repo = None
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -1366,15 +1476,19 @@ def main():
                 agent_name = args[i + 1]
                 delegate = True
                 i += 2
+            elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
             else:
                 i += 1
-        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name, domain_lint=domain_lint))
+        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name, domain_lint=domain_lint, repo=repo))
     elif cmd == "done":
         promote = False
         custom_msg = None
         target_agent = None
         handoff = True
         weight = "medium"
+        repo = None
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -1383,6 +1497,9 @@ def main():
                 i += 1
             elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
                 target_agent = args[i + 1]
+                i += 2
+            elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
                 i += 2
             elif args[i] in ["--no-handoff", "--skip-handoff"]:
                 handoff = False
@@ -1395,7 +1512,7 @@ def main():
                 i += 1
             else:
                 i += 1
-        cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff)
+        cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
     elif cmd == "sync":
         pull = "--pull" in sys.argv[2:]
         cmd_sync(pull=pull)

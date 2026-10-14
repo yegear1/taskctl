@@ -15,10 +15,97 @@ def find_repo_root(start_dir: Optional[str] = None) -> str:
         curr = parent
     return os.path.abspath(start_dir) if start_dir else os.getcwd()
 
+def resolve_repo_path(repo: Optional[str] = None, base_dir: Optional[str] = None) -> str:
+    """Resolve repository root directory from a path, relative path, or repository name.
+
+    If repo is None or empty, resolves repository root from base_dir (or current working directory).
+    If repo is a path pointing to an existing directory or file, resolves its repository root.
+    If repo is a repository name, searches in order:
+      1. Current repository root if its basename matches repo.
+      2. Direct subdirectories of base_dir or current working directory.
+      3. Sibling directories under the parent of the current repository root.
+      4. Watch directories and immediate subdirectories in TASKCTL_WATCH_REPOS.
+
+    Raises FileNotFoundError if the repository cannot be resolved or does not contain .agent/TASK.md or .git.
+    """
+    if not repo or not str(repo).strip():
+        return find_repo_root(base_dir)
+
+    raw_repo = str(repo).strip()
+    expanded = os.path.expanduser(raw_repo)
+    candidate_paths = []
+    if os.path.isabs(expanded):
+        candidate_paths.append(os.path.abspath(expanded))
+    else:
+        if base_dir:
+            candidate_paths.append(os.path.abspath(os.path.join(base_dir, expanded)))
+        candidate_paths.append(os.path.abspath(expanded))
+
+    for cand in candidate_paths:
+        if os.path.exists(cand):
+            target_dir = os.path.dirname(cand) if os.path.isfile(cand) else cand
+            root = find_repo_root(target_dir)
+            if os.path.exists(os.path.join(root, ".agent", "TASK.md")) or os.path.exists(os.path.join(root, ".git")):
+                return root
+            if os.path.isdir(target_dir):
+                return target_dir
+
+    # Treat repo as a name
+    clean_name = raw_repo.rstrip("/\\")
+    curr_root = find_repo_root(base_dir)
+
+    # 1. Matches current repo basename
+    if os.path.basename(curr_root) == clean_name:
+        return curr_root
+
+    # 2. Direct subdirectory in base_dir or cwd
+    for search_base in [base_dir, os.getcwd()]:
+        if search_base:
+            cand = os.path.abspath(os.path.join(search_base, clean_name))
+            if os.path.isdir(cand) and (
+                os.path.exists(os.path.join(cand, ".agent", "TASK.md"))
+                or os.path.exists(os.path.join(cand, ".git"))
+            ):
+                return cand
+
+    # 3. Sibling directories of the current repository
+    parent = os.path.dirname(curr_root)
+    if parent and parent != curr_root:
+        sibling = os.path.abspath(os.path.join(parent, clean_name))
+        if os.path.isdir(sibling) and (
+            os.path.exists(os.path.join(sibling, ".agent", "TASK.md"))
+            or os.path.exists(os.path.join(sibling, ".git"))
+        ):
+            return sibling
+
+    # 4. TASKCTL_WATCH_REPOS environment variable
+    env_paths = os.environ.get("TASKCTL_WATCH_REPOS", "").strip()
+    if env_paths:
+        delimiter = ":" if ":" in env_paths and not env_paths.startswith("C:") else ","
+        for item in env_paths.split(delimiter):
+            p = os.path.abspath(os.path.expanduser(item.strip()))
+            if not p or not os.path.isdir(p):
+                continue
+            if os.path.basename(p) == clean_name and (
+                os.path.exists(os.path.join(p, ".agent", "TASK.md"))
+                or os.path.exists(os.path.join(p, ".git"))
+            ):
+                return p
+            sub = os.path.join(p, clean_name)
+            if os.path.isdir(sub) and (
+                os.path.exists(os.path.join(sub, ".agent", "TASK.md"))
+                or os.path.exists(os.path.join(sub, ".git"))
+            ):
+                return sub
+
+    raise FileNotFoundError(
+        f"Repository '{repo}' not found or does not contain .agent/TASK.md or .git"
+    )
+
 def get_task_file(root_or_path: Optional[str] = None) -> str:
     if root_or_path and os.path.isfile(root_or_path):
         return root_or_path
-    root = find_repo_root(root_or_path) if root_or_path else find_repo_root()
+    root = resolve_repo_path(root_or_path) if root_or_path else find_repo_root()
     path = os.path.join(root, ".agent", "TASK.md")
     if not os.path.exists(path):
         raise FileNotFoundError(f".agent/TASK.md not found in repository root: {root}")
