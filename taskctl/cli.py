@@ -47,6 +47,10 @@ Commands:
   taskctl guard [eval|status|test]
                            Inspect guardrail status, evaluate commands against active policy,
                            and run diagnostic test matrix for terminal interception.
+  taskctl worktree [list|create|remove|prune] [--repo <path|name>] [--json]
+                           Manage ephemeral Git worktrees for isolated task execution.
+  taskctl stage verify [--stage <n>] [--plan <file>] [--base <ref>] [--repo <path|name>] [--json]
+                           Verify DAG stage tasks for disjoint file scopes and clean mergeability.
 """
 
 import os
@@ -66,6 +70,13 @@ from typing import Optional, List, Dict, Any
 from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md, resolve_repo_path
 from taskctl.core.auditor import ScopeAuditor, AuditSeverity, domain_lint_enabled
 from taskctl.core.commits import parse_conventional_commit
+from taskctl.core.worktree import (
+    WorktreeManager,
+    WorktreeInfo,
+    DisjointScopeConflict,
+    StageVerificationResult,
+    MergeVerificationResult,
+)
 from taskctl.providers.multigravity import get_profile_quotas, route_target
 from taskctl.providers.maestri import (
     resolve_maestri_cli,
@@ -1445,6 +1456,276 @@ def cmd_tokens(
     return 0
 
 
+def cmd_worktree(
+    action: str = "list",
+    task_id: Optional[str] = None,
+    branch: Optional[str] = None,
+    base_ref: str = "HEAD",
+    worktree_path: Optional[str] = None,
+    force: bool = False,
+    delete_branch: bool = False,
+    repo: Optional[str] = None,
+    json_output: bool = False,
+    extra_args: Optional[List[str]] = None,
+) -> int:
+    try:
+        repo_root = resolve_repo_path(repo)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        return 1
+
+    try:
+        mgr = WorktreeManager(repo_root=repo_root)
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize WorktreeManager: {e}")
+        return 1
+
+    repo_label = f" [{os.path.basename(repo_root)}]" if repo else ""
+
+    if action in ["list", "ls"]:
+        wts = mgr.list_worktrees()
+        if json_output:
+            print(json.dumps([wt.to_dict() for wt in wts], indent=2))
+            return 0
+
+        print("\n" + "=" * 90)
+        print(f" 🌲 ACTIVE GIT WORKTREES{repo_label}")
+        print("=" * 90)
+        if not wts:
+            print(" [INFO] No allocated git worktrees found.")
+        else:
+            print(f" {'TASK ID':<12} | {'BRANCH':<25} | {'HEAD':<9} | {'STATUS':<8} | {'PATH'}")
+            print("-" * 90)
+            for wt in wts:
+                status_str = "locked" if wt.is_locked else ("bare" if wt.is_bare else "active")
+                head_str = (wt.head_commit[:8] if wt.head_commit else "N/A")
+                branch_str = wt.branch or "(detached)"
+                print(f" {wt.task_id:<12} | {branch_str:<25} | {head_str:<9} | {status_str:<8} | {wt.path}")
+        print("=" * 90 + "\n")
+        return 0
+
+    elif action in ["create", "add", "new"]:
+        if not task_id:
+            print("[ERROR] 'taskctl worktree create' requires a task ID.")
+            return 1
+        try:
+            wt = mgr.create_worktree(
+                task_id=task_id,
+                branch=branch,
+                base_ref=base_ref,
+                worktree_path=worktree_path,
+                force=force,
+            )
+            if json_output:
+                print(json.dumps(wt.to_dict(), indent=2))
+            else:
+                head_str = f" (HEAD: {wt.head_commit[:8]})" if wt.head_commit else ""
+                print(f"[OK]{repo_label} Provisioned worktree for task [{wt.task_id}] at {wt.path} (branch: {wt.branch}){head_str}")
+            return 0
+        except Exception as e:
+            print(f"[ERROR]{repo_label} Failed to create worktree: {e}")
+            return 1
+
+    elif action in ["remove", "rm", "delete"]:
+        if not task_id:
+            print("[ERROR] 'taskctl worktree remove' requires a task ID.")
+            return 1
+        try:
+            success = mgr.remove_worktree(task_id=task_id, force=force, delete_branch=delete_branch)
+            if success:
+                print(f"[OK]{repo_label} Removed worktree for task [{task_id}].")
+                return 0
+            else:
+                print(f"[WARN]{repo_label} No worktree found matching task [{task_id}].")
+                return 1
+        except Exception as e:
+            print(f"[ERROR]{repo_label} Failed to remove worktree: {e}")
+            return 1
+
+    elif action in ["prune"]:
+        try:
+            out = mgr.prune_worktrees()
+            print(f"[OK]{repo_label} Pruned stale git worktree metadata.")
+            if out:
+                print(f"       {out}")
+            return 0
+        except Exception as e:
+            print(f"[ERROR]{repo_label} Failed to prune worktrees: {e}")
+            return 1
+
+    elif action in ["verify", "verify-stage"]:
+        return cmd_stage_verify_from_args(extra_args or [], repo=repo, json_output=json_output)
+
+    else:
+        print(f"[ERROR] Unknown worktree action: '{action}'. Available: list, create, remove, prune, verify.")
+        return 1
+
+
+def cmd_stage_verify(
+    stage_index: Optional[int] = None,
+    plan_file: Optional[str] = None,
+    base_ref: str = "HEAD",
+    repo: Optional[str] = None,
+    json_output: bool = False,
+) -> int:
+    from taskctl.core.graph import TaskDependencyGraph
+
+    try:
+        repo_root = resolve_repo_path(repo)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        return 2
+
+    repo_label = f" [{os.path.basename(repo_root)}]" if repo else ""
+
+    if plan_file:
+        try:
+            with open(plan_file, "r", encoding="utf-8") as f:
+                plan_data = json.load(f)
+        except Exception as e:
+            print(f"[ERROR] Failed to read DAG execution plan from '{plan_file}': {e}")
+            return 2
+    else:
+        try:
+            task_file = get_task_file(repo_root)
+            graph = TaskDependencyGraph.build_from_file(task_file, infer_sequential=True)
+            cycles = graph.find_cycles()
+            if cycles:
+                print(f"\n[ERROR] Task dependency graph contains cycles; cannot execute stage verification:")
+                for c in cycles:
+                    print("   - " + " -> ".join(f"[{x}]" for x in c))
+                return 2
+            plan_data = graph.export_execution_plan(only_pending=True, repo=repo_root)
+        except Exception as e:
+            print(f"[ERROR] Failed to build DAG execution plan: {e}")
+            return 2
+
+    mgr = WorktreeManager(repo_root=repo_root)
+    results = mgr.verify_plan(plan_data, stage_index=stage_index, base_ref=base_ref)
+
+    if json_output:
+        print(json.dumps([r.to_dict() for r in results], indent=2))
+        if any(r.status == "ERROR" for r in results):
+            return 2
+        elif any(r.status == "CHANGES REQUIRED" for r in results):
+            return 1
+        return 0
+
+    print("\n" + "=" * 70)
+    print(f" 🔍 STAGE MERGE & DISJOINT SCOPE VERIFICATION{repo_label}")
+    print("=" * 70)
+    print(f" Base Reference : {base_ref}")
+    print(f" Stages Checked : {len(results)}")
+    print("-" * 70)
+
+    if not results:
+        print(" [INFO] No stages to verify (all tasks completed or stage filter empty).")
+        print("=" * 70 + "\n")
+        return 0
+
+    has_error = False
+    has_changes_required = False
+
+    for r in results:
+        parallel_str = " (Parallel: True)" if len(r.task_merge_results) > 1 else ""
+        print(f" Stage {r.stage_index} (Concurrency: {len(r.task_merge_results)}{parallel_str}):")
+
+        for t in r.task_merge_results:
+            t_id = t.get("task_id", "")
+            branch = t.get("branch", "")
+            status = t.get("status", "")
+            if status == "clean":
+                ins = t.get("insertions", 0)
+                dels = t.get("deletions", 0)
+                cnt = len(t.get("files", []))
+                print(f"   • Task [{t_id}] ({branch}): ✅ CLEAN ({cnt} file(s), +{ins}/-{dels})")
+            elif status == "conflict":
+                print(f"   • Task [{t_id}] ({branch}): ❌ MERGE CONFLICT")
+                for cf in t.get("conflict_files", []):
+                    print(f"       - Conflict: {cf}")
+            elif status == "missing_branch":
+                print(f"   • Task [{t_id}] ({branch}): ⚠️  BRANCH NOT FOUND LOCALLY")
+            else:
+                msg = t.get("message") or status
+                print(f"   • Task [{t_id}] ({branch}): ❌ ERROR ({msg})")
+
+        if r.disjoint_scopes_clean:
+            if len(r.task_merge_results) > 1:
+                print("   Scopes: ✅ DISJOINT (0 overlapping files)")
+        else:
+            print(f"   Scopes: ❌ OVERLAPPING ({len(r.scope_conflicts)} conflict(s)):")
+            for sc in r.scope_conflicts:
+                tasks_str = ", ".join(f"[{tid}]" for tid in sc.conflicting_tasks)
+                branches_str = ", ".join(sc.conflicting_branches)
+                print(f"       - {sc.file_path} (modified by {tasks_str} in branches: {branches_str})")
+
+        print("-" * 70)
+
+        if r.status == "ERROR":
+            has_error = True
+        elif r.status == "CHANGES REQUIRED":
+            has_changes_required = True
+
+    if has_error:
+        print(" FINAL VERDICT: [ERROR] (exit code 2)")
+        print("=" * 70 + "\n")
+        return 2
+    elif has_changes_required:
+        print(" FINAL VERDICT: [CHANGES REQUIRED] (exit code 1)")
+        print("=" * 70 + "\n")
+        return 1
+    else:
+        print(" FINAL VERDICT: [APPROVED] (exit code 0)")
+        print("=" * 70 + "\n")
+        return 0
+
+
+def cmd_stage_verify_from_args(
+    args: List[str],
+    repo: Optional[str] = None,
+    json_output: bool = False,
+) -> int:
+    stage_idx = None
+    plan_file = None
+    base_ref = "HEAD"
+    i = 0
+    while i < len(args):
+        if args[i] in ["--stage", "-s"] and i + 1 < len(args):
+            try:
+                stage_idx = int(args[i + 1])
+            except ValueError:
+                print(f"[ERROR] Invalid stage index '{args[i + 1]}'")
+                return 2
+            i += 2
+        elif args[i] in ["--plan", "-p"] and i + 1 < len(args):
+            plan_file = args[i + 1]
+            i += 2
+        elif args[i] in ["--base", "-b"] and i + 1 < len(args):
+            base_ref = args[i + 1]
+            i += 2
+        elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
+            repo = args[i + 1]
+            i += 2
+        elif args[i] in ["--json"]:
+            json_output = True
+            i += 1
+        elif not args[i].startswith("-") and stage_idx is None:
+            try:
+                stage_idx = int(args[i])
+            except ValueError:
+                pass
+            i += 1
+        else:
+            i += 1
+    return cmd_stage_verify(
+        stage_index=stage_idx,
+        plan_file=plan_file,
+        base_ref=base_ref,
+        repo=repo,
+        json_output=json_output,
+    )
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
         print(__doc__)
@@ -1906,6 +2187,75 @@ def main():
             detailed=detailed,
             limit=limit,
         ))
+    elif cmd in ["worktree", "worktrees", "wt"]:
+        action = "list"
+        task_id = None
+        branch = None
+        base_ref = "HEAD"
+        worktree_path = None
+        force = False
+        delete_branch = False
+        repo = None
+        json_output = False
+        extra_args = []
+        args = sys.argv[2:]
+        i = 0
+        if args and not args[0].startswith("-"):
+            action = args[0].lower()
+            i = 1
+
+        while i < len(args):
+            if args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
+            elif args[i] in ["--branch", "-b"] and i + 1 < len(args):
+                branch = args[i + 1]
+                i += 2
+            elif args[i] in ["--base"] and i + 1 < len(args):
+                base_ref = args[i + 1]
+                i += 2
+            elif args[i] in ["--path", "-p"] and i + 1 < len(args):
+                worktree_path = args[i + 1]
+                i += 2
+            elif args[i] in ["--force", "-f"]:
+                force = True
+                i += 1
+            elif args[i] in ["--delete-branch", "-D"]:
+                delete_branch = True
+                i += 1
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif not args[i].startswith("-") and task_id is None and action in ["create", "add", "new", "remove", "rm", "delete"]:
+                task_id = args[i]
+                i += 1
+            else:
+                extra_args.append(args[i])
+                i += 1
+
+        sys.exit(cmd_worktree(
+            action=action,
+            task_id=task_id,
+            branch=branch,
+            base_ref=base_ref,
+            worktree_path=worktree_path,
+            force=force,
+            delete_branch=delete_branch,
+            repo=repo,
+            json_output=json_output,
+            extra_args=extra_args,
+        ))
+    elif cmd in ["stage", "stages"]:
+        subcmd = "verify"
+        args = sys.argv[2:]
+        if args and not args[0].startswith("-"):
+            subcmd = args[0].lower()
+            args = args[1:]
+        if subcmd in ["verify", "check"]:
+            sys.exit(cmd_stage_verify_from_args(args))
+        else:
+            print(f"[ERROR] Unknown stage subcommand: '{subcmd}'. Available: verify.")
+            sys.exit(1)
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)

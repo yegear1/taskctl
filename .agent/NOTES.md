@@ -99,6 +99,11 @@
 - **Decision:** Implement `export_execution_plan(only_pending=True, repo=...)` on `TaskDependencyGraph` in `taskctl.core.graph`. Group executable tasks into sequential execution waves/stages where all tasks within each stage can be executed concurrently in isolated worktrees. Compute comprehensive metadata (stages, concurrency, suggested git branch names, cycle detection, and blocked task isolation). Expose via `taskctl graph --export-plan [<file>]` (`-p`), supporting `--out` (`-o`) and `--repo` (`-r`). If cycles exist, return exit code 1 with non-executable diagnostic plan.
 - **Consequences:** Hermetic, standardized execution plan export consumable by any worktree runner or CI pipeline with zero external dependencies.
 
+### 2026-10-14 Dynamic Worktree Isolation & Stage Merge Verification
+- **Context:** Parallel tasks in DAG execution stages need isolated worktree environments, verification of disjoint file scopes, and dry-run merge verification before changes are merged into the target repository branch.
+- **Decision:** Implement `WorktreeManager` in `taskctl.core.worktree` with automatic `.git/info/exclude` safety, ephemeral worktree lifecycle management (`create_worktree`, `list_worktrees`, `remove_worktree`, `prune_worktrees`), disjoint file scope detection (`check_disjoint_scopes`), in-memory dry-run merge verification (`verify_branch_merge` using `git merge-tree --write-tree` with 3-way simulation fallback), and stage verification (`verify_stage` / `verify_plan`). Expose via CLI subcommands `taskctl worktree` (`list`, `create`, `remove`, `prune`) and `taskctl stage verify` (`--stage`, `--plan`, `--base`, `--repo`, `--json`).
+- **Consequences:** Safe, automated concurrent worktree provisioning and conflict-free DAG stage verification with semantic exit codes (`0: APPROVED`, `1: CHANGES REQUIRED`, `2: ERROR`) and zero third-party dependencies.
+
 ---
 
 ## Active Contracts
@@ -109,6 +114,8 @@
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
 | `taskctl graph` | `taskctl` | CLI / CI / Worktree Runners / Docs | ASCII Tree, Mermaid `graph TD`, JSON, Agnostic Execution Plan (`--export-plan`), Exit Code (`0: Clean`, `1: Cycle`) |
+| `taskctl worktree` | `taskctl` | CLI / Agents / Worktree Runners | Ephemeral worktree lifecycle (list, create, remove, prune) |
+| `taskctl stage verify` | `taskctl` | CI / Worktree Runners / Multi-Agent | Stage merge & disjoint scope verification; Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: ERROR` |
 | `taskctl trace` | `taskctl` | CLI / CI / Developer | ASCII Waterfall Tree, Trace Spans JSON, or SLA duration analytics |
 | `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | Generic JSON `taskctl/schemas/v1/webhook-event.schema.json` v1.0.0; Discord and Slack adapters are separate |
