@@ -283,6 +283,23 @@ class TestCLIMainRepoParsing(unittest.TestCase):
                     repo=self.repo,
                 )
 
+    def test_cli_graph_repo_arg(self):
+        with patch.object(sys, "argv", ["taskctl", "graph", "--repo", self.repo, "--export-plan"]):
+            with patch("taskctl.cli.cmd_graph", return_value=0) as mock_graph:
+                with self.assertRaises(SystemExit) as cm:
+                    main()
+                self.assertEqual(cm.exception.code, 0)
+                mock_graph.assert_called_once_with(
+                    mermaid=False,
+                    json_output=False,
+                    check_cycles=False,
+                    file_path=None,
+                    no_infer=False,
+                    export_plan=True,
+                    out_file=None,
+                    repo=self.repo,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

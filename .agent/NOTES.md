@@ -94,6 +94,11 @@
 - **Decision:** Implement abstract `TaskRunner` base class, structured `RunnerResult`, and pluggable registry in `taskctl.runners`. Built-in adapters support `maestri` (canvas hand-off with offline fallback), `multigravity` (profile worktree dispatch), `codex` (headless agent CLI), and `custom` (template command interpolation via `TASKCTL_RUNNER_COMMAND`). Support `--runner` (`-R`) flag in `taskctl next` and `taskctl done --promote`, falling back to `TASKCTL_DEFAULT_RUNNER` or defaulting to `maestri`.
 - **Consequences:** Extensible multi-agent execution with zero vendor lock-in; complete backward compatibility with existing canvas workflows.
 
+### 2026-10-14 Agnostic DAG Execution Plan Export for Concurrent Worktree Runners
+- **Context:** Concurrent and multi-agent worktree dispatchers (e.g. Multigravity orchestrator, Codex runners, parallel CI workers) need topological stage gating and concurrency boundaries without being coupled to a specific runner protocol or requiring live agent sockets.
+- **Decision:** Implement `export_execution_plan(only_pending=True, repo=...)` on `TaskDependencyGraph` in `taskctl.core.graph`. Group executable tasks into sequential execution waves/stages where all tasks within each stage can be executed concurrently in isolated worktrees. Compute comprehensive metadata (stages, concurrency, suggested git branch names, cycle detection, and blocked task isolation). Expose via `taskctl graph --export-plan [<file>]` (`-p`), supporting `--out` (`-o`) and `--repo` (`-r`). If cycles exist, return exit code 1 with non-executable diagnostic plan.
+- **Consequences:** Hermetic, standardized execution plan export consumable by any worktree runner or CI pipeline with zero external dependencies.
+
 ---
 
 ## Active Contracts
@@ -103,7 +108,7 @@
 | `.agent/TASK.md` | `taskctl` / Agent | `taskctl.core.parser` | Markdown AST task schema |
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
-| `taskctl graph` | `taskctl` | CLI / CI / Markdown Docs | ASCII Tree, Mermaid `graph TD`, JSON, or Exit Code (`0: Clean`, `1: Cycle`) |
+| `taskctl graph` | `taskctl` | CLI / CI / Worktree Runners / Docs | ASCII Tree, Mermaid `graph TD`, JSON, Agnostic Execution Plan (`--export-plan`), Exit Code (`0: Clean`, `1: Cycle`) |
 | `taskctl trace` | `taskctl` | CLI / CI / Developer | ASCII Waterfall Tree, Trace Spans JSON, or SLA duration analytics |
 | `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | Generic JSON `taskctl/schemas/v1/webhook-event.schema.json` v1.0.0; Discord and Slack adapters are separate |

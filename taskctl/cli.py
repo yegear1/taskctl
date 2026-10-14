@@ -30,8 +30,8 @@ Commands:
                            Validate commit message against Conventional Commits.
   taskctl sync             Sync current .agent/TASK.md to canvas note.
   taskctl backlog          List upcoming backlog items.
-  taskctl graph [--tree] [--mermaid] [--json] [--check-cycles] [--file <path>]
-                           Visualize task dependency DAG (ASCII tree, Mermaid, JSON, cycle detector).
+  taskctl graph [--tree] [--mermaid] [--json] [--check-cycles] [--file <path>] [--export-plan [<file>]] [--out <file>] [--repo <path|name>]
+                           Visualize task dependency DAG or export agnostic execution plan for concurrent runners.
   taskctl dashboard [--snapshot] [--interval <sec>] [--tests] [--split] [--dag]
                            Launch interactive terminal dashboard prototype displaying
                            active task contract status, DoD checklist, and scope audit.
@@ -238,9 +238,22 @@ def cmd_graph(
     check_cycles: bool = False,
     file_path: Optional[str] = None,
     no_infer: bool = False,
+    export_plan: bool = False,
+    out_file: Optional[str] = None,
+    repo: Optional[str] = None,
 ) -> int:
     import json
     from taskctl.core.graph import TaskDependencyGraph
+
+    repo_root = None
+    if repo:
+        try:
+            repo_root = resolve_repo_path(repo)
+            if file_path is None:
+                file_path = get_task_file(repo_root)
+        except FileNotFoundError as e:
+            print(f"[ERROR] {e}")
+            return 1
 
     try:
         graph = TaskDependencyGraph.build_from_file(file_path, infer_sequential=not no_infer)
@@ -261,6 +274,27 @@ def cmd_graph(
         else:
             print(f"[OK] No dependency cycles detected. {len(graph.nodes)} task node(s) verified.")
             return 0
+
+    if export_plan:
+        effective_repo = repo_root or (os.path.dirname(os.path.abspath(file_path)) if file_path else os.getcwd())
+        plan = graph.export_execution_plan(only_pending=True, repo=effective_repo)
+        plan_json = json.dumps(plan, indent=2)
+        if out_file:
+            try:
+                with open(out_file, "w", encoding="utf-8") as f:
+                    f.write(plan_json + "\n")
+                stages_count = plan["summary"]["total_stages"]
+                max_conc = plan["summary"]["max_concurrency"]
+                print(f"[OK] Agnostic DAG execution plan exported to {out_file} ({stages_count} stage(s), max concurrency: {max_conc}).")
+            except Exception as e:
+                print(f"[ERROR] Failed to write execution plan to {out_file}: {e}")
+                return 1
+        else:
+            print(plan_json)
+
+        if plan.get("has_cycles") or plan.get("summary", {}).get("has_cycles") or plan.get("cycles"):
+            return 1
+        return 0
 
     if mermaid:
         print(graph.render_mermaid())
@@ -1605,6 +1639,9 @@ def main():
         json_output = False
         check_cycles = False
         no_infer = False
+        export_plan = False
+        out_file = None
+        repo = None
         file_path = None
         args = sys.argv[2:]
         i = 0
@@ -1621,6 +1658,19 @@ def main():
             elif args[i] in ["--no-infer", "--explicit-only"]:
                 no_infer = True
                 i += 1
+            elif args[i] in ["--export-plan", "-p", "--plan"]:
+                export_plan = True
+                if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    out_file = args[i + 1]
+                    i += 2
+                else:
+                    i += 1
+            elif args[i] in ["-o", "--out", "--output"] and i + 1 < len(args):
+                out_file = args[i + 1]
+                i += 2
+            elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
             elif args[i] in ["-f", "--file"] and i + 1 < len(args):
                 file_path = args[i + 1]
                 i += 2
@@ -1637,6 +1687,9 @@ def main():
             check_cycles=check_cycles,
             file_path=file_path,
             no_infer=no_infer,
+            export_plan=export_plan,
+            out_file=out_file,
+            repo=repo,
         ))
     elif cmd in ["dashboard", "tui"]:
         snapshot = False

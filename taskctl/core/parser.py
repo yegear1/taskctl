@@ -190,11 +190,16 @@ def parse_completed_tasks(content: str) -> List[Dict[str, Any]]:
         parts = [p.strip() for p in line.split("|")[1:-1]]
         if len(parts) >= 2:
             task_id = re.sub(r"[\[\]]", "", parts[0]).strip()
-            raw_title = parts[1].strip()
+            if len(parts) >= 4:
+                raw_title = "|".join(parts[1:-2]).strip()
+                commits = parts[-2].strip()
+                date = parts[-1].strip()
+            else:
+                raw_title = parts[1].strip()
+                commits = parts[2].strip() if len(parts) > 2 else ""
+                date = parts[3].strip() if len(parts) > 3 else ""
             deps = extract_dependencies(raw_title)
             clean_title = re.sub(r"\s*\((?:deps|depends|depends on|after):\s*[^\)]+\)", "", raw_title, flags=re.IGNORECASE).strip()
-            commits = parts[2].strip() if len(parts) > 2 else ""
-            date = parts[3].strip() if len(parts) > 3 else ""
             completed.append({
                 "id": task_id,
                 "title": clean_title,

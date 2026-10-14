@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -429,3 +430,137 @@ class TaskDependencyGraph:
             },
             "edges": edges,
         }
+
+    def export_execution_plan(
+        self,
+        only_pending: bool = True,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Export an agnostic DAG execution plan grouped into concurrent stages/waves.
+
+        Args:
+            only_pending: If True, schedules only uncompleted tasks relative to
+                          already completed ones. If False, schedules all tasks.
+            repo: Optional repository root path or identifier.
+
+        Returns:
+            Dictionary conforming to the DAG execution plan contract.
+        """
+        cycles = self.find_cycles()
+        completed_nodes = [n for n in self.nodes.values() if n.is_done]
+        completed_ids = {n.id for n in completed_nodes}
+        total_tasks = len(self.nodes)
+        pending_count = sum(1 for n in self.nodes.values() if not n.is_done)
+
+        base_plan: Dict[str, Any] = {
+            "version": "1.0.0",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "repository": repo,
+            "has_cycles": len(cycles) > 0,
+            "summary": {
+                "total_tasks": total_tasks,
+                "completed_count": len(completed_nodes),
+                "pending_count": pending_count,
+                "total_stages": 0,
+                "max_concurrency": 0,
+                "has_cycles": len(cycles) > 0,
+                "is_executable": False,
+            },
+            "completed_tasks": [
+                {
+                    "id": n.id,
+                    "title": n.title,
+                    "status": n.status,
+                    "section": n.section,
+                }
+                for n in sorted(completed_nodes, key=lambda x: x.id)
+            ],
+            "stages": [],
+        }
+
+        if cycles:
+            formatted_cycles = "; ".join(" -> ".join(f"[{x}]" for x in c) for c in cycles)
+            base_plan["error"] = f"Dependency cycle(s) detected: {formatted_cycles}"
+            base_plan["cycles"] = cycles
+            return base_plan
+
+        # Determine satisfied set and candidates to schedule
+        if only_pending:
+            satisfied = set(completed_ids)
+            remaining = {nid: node for nid, node in self.nodes.items() if not node.is_done}
+        else:
+            satisfied = set()
+            remaining = dict(self.nodes)
+
+        stages: List[Dict[str, Any]] = []
+        stage_index = 0
+
+        while remaining:
+            # Find tasks whose prerequisites are completely satisfied
+            candidate_ids = [
+                nid for nid, node in remaining.items()
+                if all(dep in satisfied for dep in node.dependencies)
+            ]
+
+            if not candidate_ids:
+                # Cycle or unresolved external dependency preventing further execution
+                break
+
+            candidate_ids.sort()
+            stage_tasks = []
+            for nid in candidate_ids:
+                node = remaining[nid]
+                sanitized_branch_id = re.sub(r"[^a-zA-Z0-9_\-\.]", "-", node.id)
+                task_entry = {
+                    "id": node.id,
+                    "title": node.title,
+                    "status": node.status,
+                    "section": node.section,
+                    "dependencies": sorted(node.dependencies),
+                    "dependents": sorted(node.dependents),
+                    "ready": all(dep in completed_ids for dep in node.dependencies),
+                    "suggested_branch": f"task/{sanitized_branch_id}",
+                    "metadata": node.metadata,
+                }
+                stage_tasks.append(task_entry)
+
+            stages.append({
+                "stage_index": stage_index,
+                "concurrency": len(stage_tasks),
+                "parallel": len(stage_tasks) > 1,
+                "tasks": stage_tasks,
+            })
+
+            satisfied.update(candidate_ids)
+            for nid in candidate_ids:
+                del remaining[nid]
+            stage_index += 1
+
+        blocked_tasks = []
+        if remaining:
+            for nid in sorted(remaining.keys()):
+                node = remaining[nid]
+                sanitized_branch_id = re.sub(r"[^a-zA-Z0-9_\-\.]", "-", node.id)
+                unmet = [dep for dep in node.dependencies if dep not in satisfied]
+                blocked_tasks.append({
+                    "id": node.id,
+                    "title": node.title,
+                    "status": node.status,
+                    "section": node.section,
+                    "dependencies": sorted(node.dependencies),
+                    "unmet_dependencies": sorted(unmet),
+                    "ready": False,
+                    "suggested_branch": f"task/{sanitized_branch_id}",
+                    "metadata": node.metadata,
+                })
+            base_plan["blocked_tasks"] = blocked_tasks
+
+        max_concurrency = max((s["concurrency"] for s in stages), default=0)
+        is_executable = (len(blocked_tasks) == 0) and (not cycles)
+
+        base_plan["summary"]["total_stages"] = len(stages)
+        base_plan["summary"]["max_concurrency"] = max_concurrency
+        base_plan["summary"]["is_executable"] = is_executable
+        base_plan["stages"] = stages
+
+        return base_plan

@@ -256,6 +256,128 @@ class TestGraphEngine(unittest.TestCase):
         self.assertEqual(action, "refresh")
         self.assertEqual(dash.view_mode, "dashboard")
 
+    def test_export_execution_plan_concurrent_stages(self):
+        graph = TaskDependencyGraph()
+        # Completed prerequisite
+        graph.add_node(TaskNode(id="01.1", title="Setup Base", status="DONE", section="completed"))
+        # Stage 0: 01.2 and 01.3 both depend on 01.1 (concurrent wave!)
+        graph.add_node(TaskNode(id="01.2", title="Worker A", status="RUNNING", section="active", dependencies=["01.1"]))
+        graph.add_node(TaskNode(id="01.3", title="Worker B", status="BACKLOG", section="backlog", dependencies=["01.1"]))
+        # Stage 1: 01.4 depends on both 01.2 and 01.3
+        graph.add_node(TaskNode(id="01.4", title="Integration", status="BACKLOG", section="backlog", dependencies=["01.2", "01.3"]))
+
+        plan = graph.export_execution_plan(only_pending=True, repo="/test/repo")
+
+        self.assertEqual(plan["version"], "1.0.0")
+        self.assertEqual(plan["repository"], "/test/repo")
+        self.assertFalse(plan["summary"]["has_cycles"])
+        self.assertTrue(plan["summary"]["is_executable"])
+        self.assertEqual(plan["summary"]["total_tasks"], 4)
+        self.assertEqual(plan["summary"]["completed_count"], 1)
+        self.assertEqual(plan["summary"]["pending_count"], 3)
+        self.assertEqual(plan["summary"]["total_stages"], 2)
+        self.assertEqual(plan["summary"]["max_concurrency"], 2)
+
+        # Stage 0 check (concurrent)
+        stage0 = plan["stages"][0]
+        self.assertEqual(stage0["stage_index"], 0)
+        self.assertEqual(stage0["concurrency"], 2)
+        self.assertTrue(stage0["parallel"])
+        stage0_ids = [t["id"] for t in stage0["tasks"]]
+        self.assertEqual(stage0_ids, ["01.2", "01.3"])
+        for t in stage0["tasks"]:
+            self.assertTrue(t["ready"])
+            self.assertTrue(t["suggested_branch"].startswith("task/"))
+
+        # Stage 1 check (waits for stage 0)
+        stage1 = plan["stages"][1]
+        self.assertEqual(stage1["stage_index"], 1)
+        self.assertEqual(stage1["concurrency"], 1)
+        self.assertFalse(stage1["parallel"])
+        self.assertEqual(stage1["tasks"][0]["id"], "01.4")
+        self.assertFalse(stage1["tasks"][0]["ready"])
+
+    def test_export_execution_plan_with_cycles(self):
+        graph = TaskDependencyGraph.build_from_content(SAMPLE_CYCLIC_TASK_MD)
+        plan = graph.export_execution_plan()
+        self.assertTrue(plan["summary"]["has_cycles"])
+        self.assertFalse(plan["summary"]["is_executable"])
+        self.assertIn("error", plan)
+        self.assertGreater(len(plan["cycles"]), 0)
+        self.assertEqual(plan["stages"], [])
+
+    def test_export_execution_plan_unresolved_dependencies(self):
+        graph = TaskDependencyGraph()
+        graph.add_node(TaskNode(id="01.1", title="Task 1", status="RUNNING", dependencies=["99.9"]))
+
+        plan = graph.export_execution_plan(only_pending=True)
+        self.assertFalse(plan["summary"]["is_executable"])
+        self.assertIn("blocked_tasks", plan)
+        self.assertEqual(len(plan["blocked_tasks"]), 1)
+        self.assertEqual(plan["blocked_tasks"][0]["id"], "01.1")
+        self.assertEqual(plan["blocked_tasks"][0]["unmet_dependencies"], ["99.9"])
+
+    def test_export_execution_plan_all_stages(self):
+        graph = TaskDependencyGraph()
+        graph.add_node(TaskNode(id="A", title="Node A", status="DONE", section="completed"))
+        graph.add_node(TaskNode(id="B", title="Node B", status="BACKLOG", section="backlog", dependencies=["A"]))
+
+        plan = graph.export_execution_plan(only_pending=False)
+        self.assertEqual(plan["summary"]["total_stages"], 2)
+        self.assertEqual(plan["stages"][0]["tasks"][0]["id"], "A")
+        self.assertEqual(plan["stages"][1]["tasks"][0]["id"], "B")
+
+    def test_cmd_graph_export_plan_stdout_and_file(self):
+        import json
+        import tempfile
+
+        # Test stdout export
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            code = cmd_graph(export_plan=True)
+            self.assertEqual(code, 0)
+        out = buf.getvalue()
+        data = json.loads(out)
+        self.assertEqual(data["version"], "1.0.0")
+        self.assertIn("summary", data)
+        self.assertIn("stages", data)
+
+        # Test file export
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            tmp_out = f.name
+
+        try:
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = cmd_graph(export_plan=True, out_file=tmp_out)
+                self.assertEqual(code, 0)
+            self.assertIn("[OK] Agnostic DAG execution plan exported to", buf.getvalue())
+            with open(tmp_out, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            self.assertEqual(saved["version"], "1.0.0")
+            self.assertIn("summary", saved)
+        finally:
+            if os.path.exists(tmp_out):
+                os.remove(tmp_out)
+
+    def test_cmd_graph_export_plan_cyclic_failure(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(SAMPLE_CYCLIC_TASK_MD)
+            tmp_md = f.name
+
+        try:
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = cmd_graph(export_plan=True, file_path=tmp_md)
+                self.assertEqual(code, 1)
+            out = buf.getvalue()
+            self.assertIn("Dependency cycle(s) detected", out)
+        finally:
+            if os.path.exists(tmp_md):
+                os.remove(tmp_md)
+
 
 if __name__ == "__main__":
     unittest.main()
