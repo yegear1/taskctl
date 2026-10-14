@@ -7,7 +7,7 @@
 
 ## Active Task
 
-*(No active task. Next ID is `[02.3]` when a task is specified.)*
+*(No active task. Next ID is `[02.4]` when a task is specified.)*
 
 ---
 
@@ -15,6 +15,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [02.3] | Decouple static profiles and dynamic routing in Multigravity provider (`route_target` dynamic discovery / `multigravity route` integration) | [`1bfe178`] | 2026-10-14 |
 | [02.2] | Add `--repo <path|name>` flag across `taskctl` commands (`status`, `plan`, `next`, `audit`, `done`) for multi-repository context firewall and remote worktree auditing | [`2ab2b6c`] | 2026-10-14 |
 | [02.1] | Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check` | [`adc97f6`] | 2026-10-04 |
 | [01.2] | Publish a versioned JSON schema for webhook and Vector telemetry payloads | [`983b7a9`] | 2026-10-04 |
@@ -25,7 +26,6 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] **[02.3]** Decouple static profiles and dynamic routing in Multigravity provider (`route_target` dynamic discovery / `multigravity route` integration).
 - [ ] **[02.4]** Abstract Runner Layer in `taskctl next` with pluggable runner adapters (`--runner <maestri|multigravity|codex|custom>`).
 - [ ] **[02.5]** Export agnostic DAG execution plan (`taskctl graph --export-plan`) for concurrent worktree runners.
 
