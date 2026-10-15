@@ -117,7 +117,8 @@ class TestMultigravityProvider(unittest.TestCase):
             "quota_known": False,
         }
         normalized = _normalize_quota_item(item)
-        self.assertEqual(normalized["buckets"]["gemini"]["remaining_fraction"], 0.5)
+        self.assertEqual(normalized["buckets"]["gemini"]["remaining_fraction"], 0.0)
+        self.assertEqual(normalized["buckets"]["claude"]["remaining_fraction"], 0.0)
 
     @patch("shutil.which", return_value="/bin/multigravity")
     @patch("subprocess.run")

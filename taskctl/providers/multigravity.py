@@ -114,22 +114,21 @@ def _normalize_quota_item(item: Dict[str, Any]) -> Dict[str, Any]:
                 "reset_time": gemini_resets[min_idx],
             }
         else:
-            if normalized.get("quota_known") is False:
-                buckets["gemini"] = {
-                    "remaining_fraction": 0.5,
-                    "reset_time": "N/A",
-                }
-            else:
-                buckets["gemini"] = {
-                    "remaining_fraction": 0.0,
-                    "reset_time": "N/A",
-                }
+            buckets["gemini"] = {
+                "remaining_fraction": 0.0,
+                "reset_time": "N/A",
+            }
 
         if claude_fractions:
             min_idx = claude_fractions.index(min(claude_fractions))
             buckets["claude"] = {
                 "remaining_fraction": claude_fractions[min_idx],
                 "reset_time": claude_resets[min_idx],
+            }
+        else:
+            buckets["claude"] = {
+                "remaining_fraction": 0.0,
+                "reset_time": "N/A",
             }
 
     normalized["buckets"] = buckets
@@ -251,10 +250,10 @@ def route_target(weight: str = "medium", profiles: Optional[List[str]] = None) -
             reset_str = gemini_bucket.get("reset_time", "N/A")
             valid_profiles.append((p, rem_frac, reset_str))
         else:
-            valid_profiles.append((p, 0.5, "N/A"))
+            valid_profiles.append((p, 0.0, "N/A"))
 
     if not valid_profiles:
-        valid_profiles = [("default", 0.5, "N/A")]
+        valid_profiles = [("default", 0.0, "N/A")]
 
     valid_profiles.sort(key=lambda x: x[1], reverse=True)
     best_profile, best_fraction, best_reset = valid_profiles[0]
