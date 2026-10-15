@@ -7,6 +7,9 @@ from taskctl.providers.multigravity import (
     DEFAULT_PROFILES,
     discover_profiles,
     _normalize_quota_item,
+    get_profile_history_path,
+    read_last_history_sample,
+    normalize_history_sample,
     get_profile_quotas,
     query_multigravity_route,
     route_target,
@@ -221,6 +224,101 @@ class TestMultigravityProvider(unittest.TestCase):
         self.assertEqual(best_p, "router_profile")
         self.assertEqual(best_m, "router_model")
         self.assertEqual(reason, "router_reason")
+
+    def test_read_last_history_sample_and_normalize(self):
+        import tempfile
+        sample_1 = {
+            "timestamp": "2026-10-15T10:00:00Z",
+            "profile": "test_agent",
+            "buckets": [{"bucket_id": "gemini-5h", "remaining_fraction": 0.9, "reset_time": "12:00"}],
+        }
+        sample_2 = {
+            "timestamp": "2026-10-15T11:00:00Z",
+            "profile": "test_agent",
+            "buckets": [
+                {"bucket_id": "gemini-weekly", "remaining_fraction": 0.8, "reset_time": "tomorrow"},
+                {"bucket_id": "gemini-5h", "remaining_fraction": 0.45, "reset_time": "16:00"},
+                {"bucket_id": "3p-5h", "remaining_fraction": 0.95, "reset_time": "17:00"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
+            tf.write(json.dumps(sample_1) + "\n")
+            tf.write(json.dumps(sample_2) + "\n\n")
+            temp_path = tf.name
+
+        try:
+            last = read_last_history_sample(temp_path)
+            self.assertIsNotNone(last)
+            self.assertEqual(last["timestamp"], "2026-10-15T11:00:00Z")
+
+            normalized = normalize_history_sample(last)
+            self.assertEqual(normalized["profile"], "test_agent")
+            self.assertEqual(normalized["source"], "history")
+            self.assertEqual(normalized["buckets"]["gemini"]["remaining_fraction"], 0.45)
+            self.assertEqual(normalized["buckets"]["gemini"]["reset_time"], "16:00")
+            self.assertEqual(normalized["buckets"]["claude"]["remaining_fraction"], 0.95)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    @patch("taskctl.providers.multigravity.discover_profiles", return_value=["prof_hist"])
+    @patch("taskctl.providers.multigravity.get_profile_history_path")
+    @patch("taskctl.providers.multigravity.read_last_history_sample")
+    @patch("subprocess.run")
+    def test_get_profile_quotas_uses_history(self, mock_run, mock_read, mock_path, mock_discover):
+        mock_path.return_value = "/path/to/quota-history.jsonl"
+        mock_read.return_value = {
+            "timestamp": "2026-10-15T12:00:00Z",
+            "profile": "prof_hist",
+            "buckets": [{"bucket_id": "gemini-5h", "remaining_fraction": 0.65, "reset_time": "15:00"}],
+        }
+
+        quotas = get_profile_quotas(profiles=["prof_hist"], refresh=False)
+        self.assertIn("prof_hist", quotas)
+        self.assertEqual(quotas["prof_hist"]["source"], "history")
+        self.assertEqual(quotas["prof_hist"]["buckets"]["gemini"]["remaining_fraction"], 0.65)
+        mock_run.assert_not_called()
+
+    @patch("taskctl.providers.multigravity.discover_profiles", return_value=["prof_hist"])
+    @patch("taskctl.providers.multigravity.get_profile_history_path")
+    @patch("shutil.which", return_value="/bin/multigravity")
+    @patch("subprocess.run")
+    def test_get_profile_quotas_refresh_bypasses_history(self, mock_run, mock_which, mock_path, mock_discover):
+        mock_path.return_value = "/path/to/quota-history.jsonl"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps([
+                {"profile": "prof_hist", "buckets": {"gemini": {"remaining_fraction": 0.99, "reset_time": "18:00"}}},
+            ]),
+        )
+
+        quotas = get_profile_quotas(profiles=["prof_hist"], refresh=True)
+        self.assertIn("prof_hist", quotas)
+        self.assertEqual(quotas["prof_hist"]["buckets"]["gemini"]["remaining_fraction"], 0.99)
+        mock_run.assert_called_once()
+
+    def test_get_current_profile_detection(self):
+        from taskctl.providers.multigravity import get_current_profile
+
+        os.environ["MULTIGRAVITY_PROFILE"] = "my_custom_prof"
+        self.assertEqual(get_current_profile(), "my_custom_prof")
+
+        os.environ.pop("MULTIGRAVITY_PROFILE", None)
+        os.environ["HOME"] = "/home/developer/AntigravityProfiles/luisfmb"
+        self.assertEqual(get_current_profile(), "luisfmb")
+
+    @patch("taskctl.providers.multigravity.query_multigravity_route", return_value=None)
+    @patch("taskctl.providers.multigravity.discover_profiles", return_value=["prof_a", "prof_b"])
+    @patch("taskctl.providers.multigravity.get_profile_quotas")
+    @patch("taskctl.providers.multigravity.get_current_profile", return_value="prof_b")
+    def test_route_target_prefers_active_profile_on_tie(self, mock_curr, mock_quotas, mock_discover, mock_ext):
+        # Both prof_a and prof_b have 50% quota
+        mock_quotas.return_value = {
+            "prof_a": {"buckets": {"gemini": {"remaining_fraction": 0.50, "reset_time": "14:00"}}},
+            "prof_b": {"buckets": {"gemini": {"remaining_fraction": 0.50, "reset_time": "14:00"}}},
+        }
+        best_p, _, _ = route_target()
+        self.assertEqual(best_p, "prof_b")
 
 
 if __name__ == "__main__":

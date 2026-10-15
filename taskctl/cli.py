@@ -348,27 +348,28 @@ def cmd_dashboard(
         return 0
     return dashboard.run()
 
-def cmd_quota():
-    quotas = get_profile_quotas()
+def cmd_quota(refresh: bool = False):
+    quotas = get_profile_quotas(refresh=refresh)
     if not quotas:
         print("[WARN] Multigravity CLI not installed or returned no profile data.")
         return
 
-    print("\n" + "="*60)
+    print("\n" + "="*71)
     print(" 📊 MULTIGRAVITY QUOTA TELEMETRY")
-    print("="*60)
-    print(f"{'Profile':<12} | {'Gemini Quota':<14} | {'Reset Time':<20}")
-    print("-" * 60)
+    print("="*71)
+    print(f"{'Profile':<12} | {'Gemini Quota':<14} | {'Reset Time':<20} | {'Source':<8}")
+    print("-" * 71)
 
     for p, q in quotas.items():
         gemini = q.get("buckets", {}).get("gemini", {})
         rem_frac = gemini.get("remaining_fraction", 0.0)
         reset_time = gemini.get("reset_time", "N/A")
+        source = str(q.get("source", "live")).title()
         pct_str = f"{rem_frac*100:.1f}%"
-        print(f"{p:<12} | {pct_str:<14} | {reset_time:<20}")
+        print(f"{p:<12} | {pct_str:<14} | {reset_time:<20} | {source:<8}")
 
-    best_p, best_m, reason = route_target()
-    print("-" * 60)
+    best_p, best_m, reason = route_target(refresh=refresh)
+    print("-" * 71)
     print(f"Optimal Allocation: Profile '{best_p}' -> {best_m}")
     print(f"Reason: {reason}\n")
 
@@ -1748,7 +1749,8 @@ def main():
     elif cmd == "backlog":
         cmd_backlog()
     elif cmd == "quota":
-        cmd_quota()
+        refresh = "--refresh" in sys.argv[2:]
+        cmd_quota(refresh=refresh)
     elif cmd == "ws":
         ws_name = None
         preset = None

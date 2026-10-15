@@ -20,6 +20,10 @@ __all__ = [
     "DEFAULT_PROFILES",
     "MULTIGRAVITY_PROFILES",
     "discover_profiles",
+    "get_current_profile",
+    "get_profile_history_path",
+    "read_last_history_sample",
+    "normalize_history_sample",
     "get_profile_quotas",
     "query_multigravity_route",
     "route_target",
@@ -63,6 +67,19 @@ def discover_profiles() -> List[str]:
             pass
 
     return list(DEFAULT_PROFILES)
+
+
+def get_current_profile() -> Optional[str]:
+    """Detect current profile from environment (e.g. MULTIGRAVITY_PROFILE or HOME)."""
+    env_p = os.environ.get("MULTIGRAVITY_PROFILE") or os.environ.get("ANTIGRAVITY_PROFILE")
+    if env_p and env_p.strip():
+        return env_p.strip()
+    home = os.environ.get("HOME", "")
+    if "AntigravityProfiles" in home:
+        prof = os.path.basename(os.path.normpath(home))
+        if prof and prof != "AntigravityProfiles":
+            return prof
+    return None
 
 
 def _normalize_quota_item(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,17 +152,141 @@ def _normalize_quota_item(item: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def get_profile_quotas(profiles: Optional[List[str]] = None) -> Dict[str, Any]:
+def get_profile_history_path(profile_name: str) -> Optional[str]:
+    """Resolve the path to the quota-history.jsonl file for a given profile."""
+    multigravity_home = os.environ.get("MULTIGRAVITY_HOME") or os.path.expanduser("~/AntigravityProfiles")
+    candidates = [
+        os.path.join(multigravity_home, profile_name, ".multigravity", "quota-history.jsonl"),
+        os.path.expanduser(f"~/.multigravity/{profile_name}-quota-history.jsonl"),
+        os.path.expanduser("~/.multigravity/quota-history.jsonl") if profile_name == os.environ.get("USER") else None,
+    ]
+    for c in candidates:
+        if c and os.path.isfile(c) and os.path.getsize(c) > 0:
+            return c
+    return None
+
+
+def read_last_history_sample(file_path: str) -> Optional[Dict[str, Any]]:
+    """Read the latest non-empty sample from a JSONL file."""
+    try:
+        with open(file_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            if size == 0:
+                return None
+            buffer_size = min(8192, size)
+            f.seek(-buffer_size, os.SEEK_END)
+            chunk = f.read().decode("utf-8", errors="replace")
+            lines = chunk.splitlines()
+            for line in reversed(lines):
+                line = line.strip()
+                if line:
+                    data = json.loads(line)
+                    if isinstance(data, dict):
+                        return data
+    except Exception:
+        pass
+    return None
+
+
+def normalize_history_sample(sample: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a Sample from quota-history.jsonl into the standard taskctl quota dictionary."""
+    profile_name = str(sample.get("profile", ""))
+    raw_buckets = sample.get("buckets", [])
+
+    gemini_fractions: List[float] = []
+    gemini_resets: List[str] = []
+    claude_fractions: List[float] = []
+    claude_resets: List[str] = []
+
+    if isinstance(raw_buckets, list):
+        for b in raw_buckets:
+            if not isinstance(b, dict):
+                continue
+            b_id = str(b.get("bucket_id") or b.get("bucketId", "")).lower()
+            name = str(b.get("display_name") or b.get("displayName", "")).lower()
+            rem = float(b.get("remaining_fraction", b.get("remainingFraction", 0.0)))
+            rst = str(b.get("reset_time", b.get("resetTime", "N/A")))
+
+            if "gemini" in b_id or "gemini" in name:
+                gemini_fractions.append(rem)
+                gemini_resets.append(rst)
+            elif "claude" in b_id or "claude" in name or "3p" in b_id or "gpt" in b_id:
+                claude_fractions.append(rem)
+                claude_resets.append(rst)
+
+    buckets: Dict[str, Any] = {}
+    if gemini_fractions:
+        min_idx = gemini_fractions.index(min(gemini_fractions))
+        buckets["gemini"] = {
+            "remaining_fraction": gemini_fractions[min_idx],
+            "reset_time": gemini_resets[min_idx],
+        }
+    else:
+        buckets["gemini"] = {
+            "remaining_fraction": 0.0,
+            "reset_time": "N/A",
+        }
+
+    if claude_fractions:
+        min_idx = claude_fractions.index(min(claude_fractions))
+        buckets["claude"] = {
+            "remaining_fraction": claude_fractions[min_idx],
+            "reset_time": claude_resets[min_idx],
+        }
+    else:
+        buckets["claude"] = {
+            "remaining_fraction": 0.0,
+            "reset_time": "N/A",
+        }
+
+    return {
+        "profile": profile_name,
+        "quota_known": True,
+        "source": "history",
+        "timestamp": sample.get("timestamp"),
+        "buckets": buckets,
+    }
+
+
+def get_profile_quotas(profiles: Optional[List[str]] = None, refresh: bool = False) -> Dict[str, Any]:
     """Retrieve and normalize AI token quotas across all discovered profiles.
+
+    By default, reads the latest historical snapshot from Multigravity's quota-history.jsonl
+    for sub-millisecond latency and offline resilience. If refresh=True or history is unavailable,
+    queries the live Multigravity daemon via `multigravity quota --json`.
 
     Args:
         profiles: Optional list of profile names to filter. If None, queries all profiles.
+        refresh: If True, bypasses local history cache and queries live daemon.
     """
-    if not shutil.which("multigravity"):
-        return {}
     start_time = time.perf_counter()
-    success = False
+    target_profiles = profiles if profiles is not None else discover_profiles()
     result: Dict[str, Any] = {}
+
+    if not refresh:
+        for p in target_profiles:
+            h_path = get_profile_history_path(p)
+            if h_path:
+                sample = read_last_history_sample(h_path)
+                if sample:
+                    result[p] = normalize_history_sample(sample)
+
+        if result and (profiles is None or all(p in result for p in profiles)):
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            get_telemetry_emitter().record_provider_call(
+                provider="multigravity",
+                operation="quota",
+                duration_ms=duration_ms,
+                success=True,
+                metadata={"profiles_found": len(result), "source": "history"},
+            )
+            return result
+
+    if not shutil.which("multigravity"):
+        return result
+
+    success = False
     try:
         res = subprocess.run(
             ["multigravity", "quota", "--json"],
@@ -178,9 +319,9 @@ def get_profile_quotas(profiles: Optional[List[str]] = None) -> Dict[str, Any]:
             operation="quota",
             duration_ms=duration_ms,
             success=success,
-            metadata={"profiles_found": len(result)},
+            metadata={"profiles_found": len(result), "source": "live"},
         )
-    return {}
+    return result
 
 
 def query_multigravity_route(weight: str = "medium") -> Optional[Tuple[str, str, str]]:
@@ -225,7 +366,11 @@ def query_multigravity_route(weight: str = "medium") -> Optional[Tuple[str, str,
     return None
 
 
-def route_target(weight: str = "medium", profiles: Optional[List[str]] = None) -> Tuple[str, str, str]:
+def route_target(
+    weight: str = "medium",
+    profiles: Optional[List[str]] = None,
+    refresh: bool = False,
+) -> Tuple[str, str, str]:
     """Calculate the optimal profile and model target based on dynamic quota telemetry.
 
     First attempts dynamic routing via `multigravity route`. If unavailable or unsupported,
@@ -239,7 +384,7 @@ def route_target(weight: str = "medium", profiles: Optional[List[str]] = None) -
     if not target_profiles:
         target_profiles = list(DEFAULT_PROFILES)
 
-    quotas = get_profile_quotas(profiles=target_profiles)
+    quotas = get_profile_quotas(profiles=target_profiles, refresh=refresh)
     valid_profiles: List[Tuple[str, float, str]] = []
 
     for p in target_profiles:
@@ -257,6 +402,13 @@ def route_target(weight: str = "medium", profiles: Optional[List[str]] = None) -
 
     valid_profiles.sort(key=lambda x: x[1], reverse=True)
     best_profile, best_fraction, best_reset = valid_profiles[0]
+
+    curr_prof = get_current_profile()
+    if curr_prof and curr_prof != best_profile:
+        for p, frac, rst in valid_profiles:
+            if p == curr_prof and frac >= 0.05 and (best_fraction - frac) < 0.05:
+                best_profile, best_fraction, best_reset = p, frac, rst
+                break
 
     if best_fraction >= 0.01:
         if weight == "light":
