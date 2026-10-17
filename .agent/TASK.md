@@ -7,7 +7,7 @@
 
 ## Active Task
 
-*(No active task. Backlog is empty. Next ID is `[02.7]` when a task is specified.)*
+*(No active task. Next ID is `[02.8]` when a task is specified.)*
 
 ---
 
@@ -15,6 +15,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [02.7] | Knowledge Cards Engine (SQLite FTS5 / BM25) & CLI Subcommands | [`e97b9d2`] | 2026-10-17 |
 | [02.6] | Dynamic worktree isolation and branch merge verification for DAG execution stages | [`96c47c2`] | 2026-10-14 |
 | [02.5] | Export agnostic DAG execution plan (`taskctl graph --export-plan`) for concurrent worktree runners | [`e962fbd`] | 2026-10-14 |
 | [02.4] | Abstract Runner Layer in `taskctl next` with pluggable runner adapters (`--runner <maestri|multigravity|codex|custom>`) | [`1257c73`] | 2026-10-14 |
@@ -29,8 +30,8 @@
 
 ## Backlog (Upcoming, in priority order)
 
-*(Backlog empty)*
-
+- [ ] [02.8] Context Propagation & Trace Genesis (`MAESTRI_TRACE_ID` in `taskctl next` & `taskctl done` lifecycle spans to VictoriaLogs)
+- [ ] [02.9] CLI `taskctl trace [XX.Y]` (VictoriaLogs LogsQL aggregation for cycle timeline, duration, blocked commands and token summary)
 
 ---
 
