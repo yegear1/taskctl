@@ -7,7 +7,17 @@
 
 ## Active Task
 
-*(No active task. Next ID is `[02.9]` when a task is specified.)*
+### 📌 Task [XX.Y]: [Short descriptive title]
+
+- **Description:** [Brief description of the next task]
+- **Systems Involved:** [e.g. taskctl.core, taskctl.cli]
+- **Action Type:**
+  - [ ] Read-only / Documentation
+  - [ ] Source code changes
+- **Status:** READY FOR PLANNING
+
+### Acceptance Criteria
+- [ ] Criterion 1
 
 ---
 
@@ -15,6 +25,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [02.9] | CLI `taskctl trace [XX.Y]` (VictoriaLogs LogsQL Aggregation) | [`011263e`] | 2026-10-17 |
 | [02.8] | Context Propagation & Trace Genesis (`MAESTRI_TRACE_ID` in `taskctl next` & `taskctl done` lifecycle spans to VictoriaLogs) | [`1cfdb28`] | 2026-10-17 |
 | [02.7] | Knowledge Cards Engine (SQLite FTS5 / BM25) & CLI Subcommands | [`e97b9d2`] | 2026-10-17 |
 | [02.6] | Dynamic worktree isolation and branch merge verification for DAG execution stages | [`96c47c2`] | 2026-10-14 |
@@ -31,7 +42,7 @@
 
 ## Backlog (Upcoming, in priority order)
 
-- [ ] [02.9] CLI `taskctl trace [XX.Y]` (VictoriaLogs LogsQL aggregation for cycle timeline, duration, blocked commands and token summary)
+*(Backlog empty. All Epic 02 tasks scheduled or completed.)*
 
 ---
 
