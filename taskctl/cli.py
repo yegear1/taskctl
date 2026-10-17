@@ -28,7 +28,8 @@ Commands:
                            dispatch completion hand-off to Auditor/Planner, and trigger webhooks.
   taskctl lint-commit [msg] [--file <path>] [--rev <rev>] [--range <range>] [--head]
                            Validate commit message against Conventional Commits.
-  taskctl sync             Sync current .agent/TASK.md to canvas note.
+  taskctl sync [--pull] [--hud]
+                           Sync current .agent/TASK.md or real-time Live Telemetry HUD to canvas note.
   taskctl backlog          List upcoming backlog items.
   taskctl graph [--tree] [--mermaid] [--json] [--check-cycles] [--file <path>] [--export-plan [<file>]] [--out <file>] [--repo <path|name>]
                            Visualize task dependency DAG or export agnostic execution plan for concurrent runners.
@@ -51,6 +52,10 @@ Commands:
                            Manage ephemeral Git worktrees for isolated task execution.
   taskctl stage verify [--stage <n>] [--plan <file>] [--base <ref>] [--repo <path|name>] [--json]
                            Verify DAG stage tasks for disjoint file scopes and clean mergeability.
+  taskctl recall "<query>" [--component <c>] [--json] [--detailed] [--repo <path|name>]
+                           Search Knowledge Cards via SQLite FTS5 BM25 full-text ranking.
+  taskctl reflex [--stderr "<log>"] [--file <path>] [--json] [--repo <path|name>]
+                           Detect immediate solutions and gotchas from error signatures and stack traces.
 """
 
 import os
@@ -70,6 +75,7 @@ from typing import Optional, List, Dict, Any
 from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md, resolve_repo_path
 from taskctl.core.auditor import ScopeAuditor, AuditSeverity, domain_lint_enabled
 from taskctl.core.commits import parse_conventional_commit
+from taskctl.core.knowledge import KnowledgeEngine, KnowledgeCard
 from taskctl.core.worktree import (
     WorktreeManager,
     WorktreeInfo,
@@ -94,6 +100,8 @@ from taskctl.providers.maestri import (
     dispatch_agent_handoff,
     handoff_task_start,
     handoff_task_done,
+    sync_hud_note,
+    generate_hud_markdown,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
 from taskctl.telemetry import (
@@ -435,6 +443,10 @@ def cmd_next(
         print(f"[Quota Route] Profile: {best_profile} | Model: {best_model} (Weight: {weight})")
 
         sync_task_cockpit_note(updated)
+        try:
+            sync_hud_note(generate_hud_markdown(repo_root))
+        except Exception:
+            pass
 
         webhook = WebhookDispatcher()
         webhook.send_event(
@@ -639,6 +651,10 @@ def cmd_audit(
                 ],
             },
         )
+        try:
+            sync_hud_note(generate_hud_markdown(str(repo_path)))
+        except Exception:
+            pass
         return verdict.exit_code
 
 def cmd_lint_commit(
@@ -845,6 +861,10 @@ def cmd_done(
         print(f"[COMMIT 2/2] Governance commit created: {gov_hash}")
 
         sync_task_cockpit_note(updated)
+        try:
+            sync_hud_note(generate_hud_markdown(repo_root))
+        except Exception:
+            pass
 
         webhook = WebhookDispatcher()
         webhook.send_event(
@@ -1065,13 +1085,28 @@ def cmd_plan(prompt: str, repo: Optional[str] = None):
     )
     print("="*58 + "\n")
 
-def cmd_sync(pull: bool = False):
+def cmd_sync(pull: bool = False, hud: bool = False):
     task_file = get_task_file()
     print("\n" + "="*58)
     print(" 🔄 REAL-TIME CANVAS CONTRACT SYNC")
     print("="*58)
 
-    if pull:
+    if hud:
+        print(" [MODE] Syncing real-time HUD telemetry to remote canvas note...")
+        hud_content = generate_hud_markdown()
+        ok = sync_hud_note(hud_content)
+        if ok:
+            print(" ✅ [OK] Successfully synced Live Telemetry HUD to Maestri canvas note.")
+        else:
+            print(" ⚠️  [WARN] HUD sync skipped or degraded (Maestri CLI or socket not available).")
+        get_telemetry_emitter().emit_lifecycle_event(
+            event_type="hud_sync",
+            task_id="HUD",
+            message="Synced Live Telemetry HUD to canvas note",
+            status="SYNCED" if ok else "DEGRADED",
+            details={"success": ok},
+        )
+    elif pull:
         print(" [MODE] Pulling remote canvas note to local .agent/TASK.md...")
         remote_content = pull_task_cockpit_note()
         if not remote_content:
@@ -1106,6 +1141,12 @@ def cmd_sync(pull: bool = False):
             print(" ✅ [OK] Successfully synced .agent/TASK.md to Maestri canvas note.")
         else:
             print(" ⚠️  [WARN] Note sync skipped or degraded (Maestri CLI or socket not available).")
+
+        # Also opportunistically refresh HUD note
+        try:
+            sync_hud_note(generate_hud_markdown())
+        except Exception:
+            pass
 
         get_telemetry_emitter().emit_lifecycle_event(
             event_type="canvas_sync",
@@ -1727,6 +1768,197 @@ def cmd_stage_verify_from_args(
     )
 
 
+def cmd_recall(
+    query: str,
+    component: Optional[str] = None,
+    json_output: bool = False,
+    detailed: bool = False,
+    repo: Optional[str] = None,
+    limit: int = 10,
+) -> int:
+    """Recall knowledge cards matching query term with SQLite FTS5 BM25 ranking."""
+    try:
+        with KnowledgeEngine(repo_path=repo) as engine:
+            results = engine.search(query=query, component=component, limit=limit)
+    except Exception as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "results": []}))
+        else:
+            print(f"[ERROR] Failed to search knowledge cards: {e}")
+        return 1
+
+    if json_output:
+        payload = [
+            {
+                "id": card.id,
+                "title": card.title,
+                "type": card.type,
+                "score": score,
+                "components": card.components,
+                "error_keywords": card.error_keywords,
+                "platforms": card.platforms,
+                "invariants_affected": card.invariants_affected,
+                "problem": card.problem,
+                "solution": card.solution,
+                "never_do": card.never_do,
+                "filepath": card.filepath,
+            }
+            for card, score in results
+        ]
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print("\n" + "=" * 70)
+    print(" 🧠 KNOWLEDGE BASE RECALL (SQLite FTS5 / BM25)")
+    print(f' Query     : "{query}"')
+    if component:
+        print(f" Component : {component}")
+    print(f" Matches   : {len(results)} card(s)")
+    print("=" * 70)
+
+    if not results:
+        print("\n [INFO] No knowledge cards found matching query.")
+        print("=" * 70 + "\n")
+        return 0
+
+    for idx, (card, score) in enumerate(results, start=1):
+        score_str = f"BM25: {score:.6f}" if score > 0 else "all"
+        print(f"\n[{idx}] 🎯 [{card.id}] {card.title} ({card.type}) [{score_str}]")
+        if card.components:
+            print(f"    Components : {', '.join(card.components)}")
+        if card.platforms:
+            print(f"    Platforms  : {', '.join(card.platforms)}")
+        if card.invariants_affected:
+            print(f"    Invariants : {', '.join(card.invariants_affected)}")
+        if card.error_keywords:
+            print(f"    Keywords   : {', '.join(card.error_keywords)}")
+
+        if detailed:
+            if card.problem:
+                print("\n    📌 Problem:")
+                for l in card.problem.splitlines():
+                    print(f"       {l}")
+            if card.solution:
+                print("\n    💡 Solution:")
+                for l in card.solution.splitlines():
+                    print(f"       {l}")
+            if card.never_do:
+                print("\n    ⚠️  Never Do:")
+                for l in card.never_do.splitlines():
+                    print(f"       {l}")
+        else:
+            if card.solution:
+                sol_first = card.solution.strip().splitlines()[0] if card.solution.strip() else ""
+                if len(card.solution.strip().splitlines()) > 1:
+                    sol_first += " [...]"
+                print(f"    💡 Solution : {sol_first}")
+            elif card.problem:
+                prob_first = card.problem.strip().splitlines()[0] if card.problem.strip() else ""
+                print(f"    📌 Problem  : {prob_first}")
+
+    print("\n" + "=" * 70 + "\n")
+    return 0
+
+
+def cmd_reflex(
+    stderr_content: Optional[str] = None,
+    file_path: Optional[str] = None,
+    json_output: bool = False,
+    repo: Optional[str] = None,
+    limit: int = 5,
+) -> int:
+    """Headless error signature reflex evaluator against stack traces and error logs."""
+    raw_stderr = ""
+    if stderr_content is not None:
+        raw_stderr = stderr_content
+    elif file_path:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                raw_stderr = f.read()
+        except OSError as e:
+            if json_output:
+                print(json.dumps({"error": f"Failed to read file: {e}", "matches": []}))
+            else:
+                print(f"[ERROR] Failed to read stderr file '{file_path}': {e}")
+            return 1
+    elif not sys.stdin.isatty():
+        try:
+            raw_stderr = sys.stdin.read()
+        except Exception:
+            raw_stderr = ""
+
+    if not raw_stderr.strip():
+        if json_output:
+            print(json.dumps({"error": "No stderr content provided", "matches": []}))
+        else:
+            print("[WARN] No stderr log provided to reflex evaluator. Use --stderr \"<log>\" or pipe via stdin.")
+        return 1
+
+    try:
+        with KnowledgeEngine(repo_path=repo) as engine:
+            matches = engine.reflex(stderr_content=raw_stderr, limit=limit)
+    except Exception as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "matches": []}))
+        else:
+            print(f"[ERROR] Reflex evaluation error: {e}")
+        return 1
+
+    if json_output:
+        payload = [
+            {
+                "id": card.id,
+                "title": card.title,
+                "type": card.type,
+                "score": score,
+                "matched_keywords": matched_kw,
+                "components": card.components,
+                "problem": card.problem,
+                "solution": card.solution,
+                "never_do": card.never_do,
+                "invariants_affected": card.invariants_affected,
+            }
+            for card, score, matched_kw in matches
+        ]
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print("\n" + "=" * 70)
+    print(f" ⚡ KNOWLEDGE ERROR REFLEX EVALUATOR ({len(matches)} match(es))")
+    print("=" * 70)
+
+    if not matches:
+        print("\n [INFO] No matching error reflex knowledge card found for provided stderr.")
+        print("=" * 70 + "\n")
+        return 0
+
+    for idx, (card, score, matched_kw) in enumerate(matches, start=1):
+        print(f"\n[{idx}] 🎯 [{card.id}] {card.title} ({card.type}) [Reflex Score: {score:.1f}]")
+        if matched_kw:
+            sigs = ", ".join(f'"{k}"' for k in matched_kw)
+            print(f"    Matched Signatures : {sigs}")
+        if card.components:
+            print(f"    Components         : {', '.join(card.components)}")
+
+        if card.solution:
+            print("\n    💡 IMMEDIATE SOLUTION:")
+            for l in card.solution.splitlines():
+                print(f"       {l}")
+
+        if card.never_do:
+            print("\n    ⚠️  NEVER DO:")
+            for l in card.never_do.splitlines():
+                print(f"       {l}")
+
+        if card.problem:
+            print("\n    📌 Failure Mode / Problem:")
+            for l in card.problem.splitlines():
+                print(f"       {l}")
+
+    print("\n" + "=" * 70 + "\n")
+    return 0
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
         print(__doc__)
@@ -1888,7 +2120,8 @@ def main():
             cmd_done(custom_msg=custom_msg, promote=promote, weight=weight, target_agent=target_agent, handoff=handoff, repo=repo)
     elif cmd == "sync":
         pull = "--pull" in sys.argv[2:]
-        cmd_sync(pull=pull)
+        hud = "--hud" in sys.argv[2:]
+        cmd_sync(pull=pull, hud=hud)
     elif cmd == "notify":
         msg = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Test notification"
         cmd_notify(msg)
@@ -2258,6 +2491,87 @@ def main():
         else:
             print(f"[ERROR] Unknown stage subcommand: '{subcmd}'. Available: verify.")
             sys.exit(1)
+    elif cmd in ["recall", "k-search", "knowledge"]:
+        query_parts: List[str] = []
+        component = None
+        json_output = False
+        detailed = False
+        repo = None
+        limit = 10
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-c", "--component"] and i + 1 < len(args):
+                component = args[i + 1]
+                i += 2
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["-d", "--detailed"]:
+                detailed = True
+                i += 1
+            elif args[i] in ["-r", "--repo"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
+            elif args[i] in ["-l", "--limit"] and i + 1 < len(args):
+                try:
+                    limit = int(args[i + 1])
+                except ValueError:
+                    limit = 10
+                i += 2
+            elif not args[i].startswith("-"):
+                query_parts.append(args[i])
+                i += 1
+            else:
+                i += 1
+        query = " ".join(query_parts) if query_parts else "*"
+        sys.exit(cmd_recall(
+            query=query,
+            component=component,
+            json_output=json_output,
+            detailed=detailed,
+            repo=repo,
+            limit=limit,
+        ))
+    elif cmd in ["reflex", "k-reflex"]:
+        stderr_content = None
+        file_path = None
+        json_output = False
+        repo = None
+        limit = 5
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] in ["-s", "--stderr"] and i + 1 < len(args):
+                stderr_content = args[i + 1]
+                i += 2
+            elif args[i] in ["-f", "--file"] and i + 1 < len(args):
+                file_path = args[i + 1]
+                i += 2
+            elif args[i] in ["--json"]:
+                json_output = True
+                i += 1
+            elif args[i] in ["-r", "--repo"] and i + 1 < len(args):
+                repo = args[i + 1]
+                i += 2
+            elif args[i] in ["-l", "--limit"] and i + 1 < len(args):
+                try:
+                    limit = int(args[i + 1])
+                except ValueError:
+                    limit = 5
+                i += 2
+            elif not args[i].startswith("-") and stderr_content is None:
+                stderr_content = args[i]
+                i += 1
+            else:
+                i += 1
+        sys.exit(cmd_reflex(
+            stderr_content=stderr_content,
+            file_path=file_path,
+            json_output=json_output,
+            repo=repo,
+            limit=limit,
+        ))
     else:
         print(f"Unknown command: '{cmd}'. Run 'taskctl --help' for usage.")
         sys.exit(1)

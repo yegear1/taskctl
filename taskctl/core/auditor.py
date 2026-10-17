@@ -121,6 +121,15 @@ class TaskContractRule:
                 message=f"Failed to parse .agent/TASK.md: {e}",
             )
 
+        if not active_task:
+            if re.search(r"\*\(No active task", content, re.IGNORECASE):
+                return RuleResult(
+                    rule_name=self.rule_name,
+                    severity=AuditSeverity.APPROVED,
+                    message="Task contract [.agent/TASK.md] verified: Idle workbench (no active task).",
+                    details={"task_id": "IDLE", "status": "IDLE", "backlog_count": len(backlog)},
+                )
+
         task_id = active_task.get("id", "").strip()
         status = active_task.get("status", "").strip()
         title = active_task.get("title", "").strip()
@@ -341,6 +350,12 @@ class CommitConventionRule:
                 )
 
             commit_msg = log_res.stdout
+            if commit_msg.strip().lower().startswith("merge"):
+                return RuleResult(
+                    rule_name=self.rule_name,
+                    severity=AuditSeverity.APPROVED,
+                    message="Latest commit (HEAD) is a merge commit; conventional commit check skipped.",
+                )
             validation = parse_conventional_commit(commit_msg)
             if not validation.is_valid:
                 return RuleResult(

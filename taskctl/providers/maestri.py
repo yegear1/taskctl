@@ -823,3 +823,134 @@ def handoff_task_done(
         target_agent=target_agent,
         timeout=timeout,
     )
+
+
+def sync_hud_note(hud_content: str, note_title: str = "hud") -> bool:
+    """Sync live telemetry HUD content to Maestri canvas note ('hud' or 'hud.md')."""
+    ipc = MaestriIPCClient()
+    titles_to_try = [note_title]
+    if not note_title.endswith(".md"):
+        titles_to_try.append(f"{note_title}.md")
+    else:
+        titles_to_try.append(note_title[:-3])
+
+    if ipc.is_available():
+        for title in titles_to_try:
+            resp = ipc.send_request("note_write", {"name": title, "content": hud_content})
+            if resp and resp.get("result"):
+                return True
+        for title in titles_to_try:
+            resp_create = ipc.send_request("note_create", {"name": title, "content": hud_content})
+            if resp_create and resp_create.get("result"):
+                return True
+
+    for title in titles_to_try:
+        res_write = run_maestri_cli(["note", "write", title, hud_content])
+        if res_write and res_write.returncode == 0:
+            return True
+
+    for title in titles_to_try:
+        res_create = run_maestri_cli(["note", "create", hud_content, "--name", title])
+        if res_create and res_create.returncode == 0:
+            return True
+
+    for title in titles_to_try:
+        res_update = run_maestri_cli(["note", "update", title, hud_content])
+        if res_update and res_update.returncode == 0:
+            return True
+
+    return False
+
+
+def generate_hud_markdown(repo_path: Optional[str] = None) -> str:
+    """Compile real-time HUD telemetry markdown from active task, multigravity quota, and git workbench."""
+    from taskctl.core.parser import resolve_repo_path, get_task_file, parse_task_md
+    from taskctl.providers.multigravity import get_profile_quotas, route_target
+
+    try:
+        resolved_repo = resolve_repo_path(repo_path)
+    except Exception:
+        resolved_repo = os.getcwd()
+
+    task_id = "N/A"
+    status = "IDLE"
+    target_profile = "default"
+    target_model = "default"
+
+    try:
+        task_file = get_task_file(resolved_repo)
+        if os.path.exists(task_file):
+            with open(task_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            active_task, _ = parse_task_md(content)
+            if active_task:
+                task_id = active_task.get("id", "N/A")
+                status = active_task.get("status", "IDLE")
+                runtime_target = active_task.get("target", "")
+                prof_m = re.search(r"Profile\s+'([^']+)'", runtime_target)
+                if prof_m:
+                    target_profile = prof_m.group(1)
+                mod_m = re.search(r"Model:\s+'([^']+)'", runtime_target)
+                if mod_m:
+                    target_model = mod_m.group(1)
+    except Exception:
+        pass
+
+    # Quota telemetry
+    quotas = get_profile_quotas() or {}
+    quota_parts = []
+    for p in ["luisfmb", "joaoww", "yegear"]:
+        if p in quotas:
+            gem = quotas[p].get("buckets", {}).get("gemini", {})
+            rem_frac = gem.get("remaining_fraction", 0.5)
+            quota_parts.append(f"{p}: {rem_frac*100:.1f}%")
+        else:
+            quota_parts.append(f"{p}: N/A")
+    quotas_str = " | ".join(quota_parts)
+
+    best_p, best_m, _ = route_target()
+    active_prof_str = target_profile if target_profile != "default" else best_p
+    active_model_str = target_model if target_model != "default" else best_m
+
+    # Git workbench
+    try:
+        res = subprocess.run(
+            ["git", "status", "-s"],
+            capture_output=True,
+            text=True,
+            cwd=resolved_repo,
+            timeout=5.0,
+        )
+        changed_lines = [l for l in res.stdout.strip().splitlines() if l.strip()]
+        if not changed_lines:
+            git_status_str = "Clean"
+        else:
+            git_status_str = f"{len(changed_lines)} modified file(s)"
+    except Exception:
+        git_status_str = "Unknown"
+
+    # Auditor status
+    if status == "DONE":
+        auditor_str = "APPROVED"
+    elif status == "PLANNING":
+        auditor_str = "PENDING REVIEW"
+    elif status == "RUNNING":
+        auditor_str = "IN PROGRESS"
+    else:
+        auditor_str = status
+
+    return f"""# Live Telemetry HUD
+
+*Status: Canvas Monitoring Active.*
+
+### ⚡ Quota & Model Telemetry:
+- **Active Profile:** `{active_prof_str}` ({active_model_str})
+- **Quotas:** {quotas_str}
+- **Optimal Route:** `{best_p}`
+
+### 🎯 Active Task:
+- **Task ID:** [{task_id}]
+- **Status:** {status}
+- **Auditor:** {auditor_str}
+- **Git Workbench:** {git_status_str}
+"""

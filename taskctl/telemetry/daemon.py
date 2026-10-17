@@ -94,11 +94,20 @@ class TelemetryDaemon:
         except Exception:
             return None
 
+    def refresh_hud(self) -> None:
+        """Update live telemetry HUD note on Maestri canvas."""
+        try:
+            from taskctl.providers.maestri import sync_hud_note, generate_hud_markdown
+            sync_hud_note(generate_hud_markdown())
+        except Exception:
+            pass
+
     def run_once(self) -> Dict[str, Any]:
         """Execute a single aggregation sweep, broadcast summary, print output, and return."""
         summary = self.aggregator.get_summary()
         self.broadcaster.broadcast_summary(summary)
         self.refresh_tokens()
+        self.refresh_hud()
 
         if self.output_format == "json":
             print(json.dumps(summary, indent=2))
@@ -131,6 +140,7 @@ class TelemetryDaemon:
         # Initial summary broadcast
         initial_summary = self.aggregator.get_summary()
         self.broadcaster.broadcast_summary(initial_summary)
+        self.refresh_hud()
         self._last_summary_time = time.time()
 
         if self.output_format != "json":
@@ -150,12 +160,16 @@ class TelemetryDaemon:
                     # Broadcast event to configured sinks
                     self.broadcaster.broadcast_event(event)
 
+                if events:
+                    self.refresh_hud()
+
                 # Periodic roll-up summary & token cache refresh
                 now = time.time()
                 if now - self._last_summary_time >= self.summary_interval:
                     summary = self.aggregator.get_summary()
                     self.broadcaster.broadcast_summary(summary)
                     self.refresh_tokens()
+                    self.refresh_hud()
                     self._last_summary_time = now
 
                 # Sleep in small slices to remain interruptible
