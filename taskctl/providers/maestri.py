@@ -689,6 +689,9 @@ def dispatch_agent_handoff(
     else:
         candidates = ["Auditor", "ScopeAuditor", "TestVerifier", "Planner"]
 
+    trace_id = task_data.get("trace_id") or os.environ.get("MAESTRI_TRACE_ID") or os.environ.get("TASKCTL_TRACE_ID")
+    traceparent = task_data.get("traceparent") or os.environ.get("TRACEPARENT")
+
     # 2. Build structured prompt & ambient canvas notification
     if normalized_phase == "start":
         criteria_list = task_data.get("criteria", [])
@@ -701,10 +704,12 @@ def dispatch_agent_handoff(
         else:
             criteria_str = str(criteria_list)
 
+        trace_line = f"Trace ID: {trace_id}\n" if trace_id else ""
         prompt = (
             f"[TASK LIFECYCLE HAND-OFF: START]\n"
             f"Task [{task_id}]: {title}\n"
             f"Status: RUNNING\n"
+            f"{trace_line}"
             f"Runtime Target: {task_data.get('runtime_target', 'Profile default')}\n"
             f"Systems Involved: {task_data.get('systems', 'N/A')}\n"
             f"Description: {task_data.get('description', 'N/A')}\n"
@@ -717,10 +722,12 @@ def dispatch_agent_handoff(
     else:
         commit_hash = task_data.get("commit_hash", "HEAD")
         gov_hash = task_data.get("governance_commit", "HEAD")
+        trace_line = f"Trace ID: {trace_id}\n" if trace_id else ""
         prompt = (
             f"[TASK LIFECYCLE HAND-OFF: COMPLETION]\n"
             f"Task [{task_id}]: {title}\n"
             f"Status: DONE\n"
+            f"{trace_line}"
             f"Feature Commit: {commit_hash}\n"
             f"Governance Commit: {gov_hash}\n\n"
             f"Instructions:\n"
@@ -768,6 +775,7 @@ def dispatch_agent_handoff(
                 "target_agent": agent_used,
                 "delivered": delivered,
                 "candidates": candidates,
+                "trace_id": trace_id,
             },
         )
         emitter.emit_lifecycle_event(
@@ -777,10 +785,13 @@ def dispatch_agent_handoff(
             status="DELIVERED" if delivered else "DEGRADED",
             duration_ms=duration_ms,
             level="info" if delivered else "warn",
+            trace_id=trace_id,
             details={
                 "phase": normalized_phase,
                 "target_agent": agent_used,
                 "delivered": delivered,
+                "trace_id": trace_id,
+                "traceparent": traceparent,
                 "error": error if not delivered else None,
             },
         )

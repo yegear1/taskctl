@@ -29,6 +29,10 @@ __all__ = [
     "get_tracer",
     "DurationAnalyzer",
     "TracingAlertPolicy",
+    "normalize_trace_id",
+    "save_active_trace",
+    "load_active_trace",
+    "clear_active_trace",
     "SessionTokenRecord",
     "RoleTokenAggregation",
     "collect_token_telemetry",
@@ -49,6 +53,10 @@ def __getattr__(name: str):
         "get_tracer",
         "DurationAnalyzer",
         "TracingAlertPolicy",
+        "normalize_trace_id",
+        "save_active_trace",
+        "load_active_trace",
+        "clear_active_trace",
     ):
         from taskctl.telemetry import tracing
         return getattr(tracing, name)

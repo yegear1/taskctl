@@ -114,6 +114,10 @@ from taskctl.telemetry import (
     TraceContext,
     Span,
     DurationAnalyzer,
+    normalize_trace_id,
+    save_active_trace,
+    load_active_trace,
+    clear_active_trace,
 )
 from taskctl.runners import get_runner, list_runners, RunnerResult
 from taskctl.tui import Dashboard
@@ -414,6 +418,11 @@ def cmd_next(
     with tracer.start_span("cli.next", tags={"task_id": next_id, "weight": weight, "repo": repo_name}) as root_span:
         best_profile, best_model, _ = route_target(weight=weight)
 
+        # Trace Genesis / Propagation environment export
+        os.environ["MAESTRI_TRACE_ID"] = root_span.trace_id
+        os.environ["TRACEPARENT"] = root_span.context.to_traceparent()
+        save_active_trace(repo_root, next_id, root_span.context)
+
         updated = content
         old_task_pat = r"(### 📌 Task )\[([^\]]+)\]:\s*([^\n]+)"
         updated = re.sub(old_task_pat, rf"\1[{next_id}]: {next_title}", updated, count=1)
@@ -431,6 +440,22 @@ def cmd_next(
             updated,
             count=1
         )
+
+        if re.search(r"-\s*\*\*Trace ID:\*\*", updated, re.IGNORECASE):
+            updated = re.sub(
+                r"(-\s*\*\*Trace ID:\*\*)[^\n]+",
+                rf"\1 {root_span.trace_id}",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        else:
+            updated = re.sub(
+                r"(-\s*\*\*Status:\*\*\s*RUNNING\s*\n)",
+                rf"\1- **Trace ID:** {root_span.trace_id}\n",
+                updated,
+                count=1,
+            )
 
         backlog_line_pat = rf"-\s*\[ \]\s*(?:\*\*|`)?\[{re.escape(next_id)}\](?:\*\*|`)?\s*[^\n]*\n?"
         updated = re.sub(backlog_line_pat, "", updated)
@@ -485,6 +510,8 @@ def cmd_next(
                 "task_id": next_id,
                 "title": next_title,
                 "status": "RUNNING",
+                "trace_id": root_span.trace_id,
+                "traceparent": root_span.context.to_traceparent(),
                 "target_profile": best_profile,
                 "target_model": best_model,
                 "description": promoted_active.get("description", "") if promoted_active else "",
@@ -800,9 +827,20 @@ def cmd_done(
     task_id = active_task.get("id", "XX.Y")
     title = active_task.get("title", "Ad-hoc task")
 
+    cached_ctx = load_active_trace(repo_root, expected_task_id=task_id)
+    raw_trace_id = (
+        os.environ.get("MAESTRI_TRACE_ID")
+        or os.environ.get("TASKCTL_TRACE_ID")
+        or active_task.get("trace_id")
+        or (cached_ctx.trace_id if cached_ctx else None)
+    )
+    resolved_trace_id = normalize_trace_id(raw_trace_id)
+
     tracer = get_tracer()
     repo_name = os.path.basename(repo_root)
-    with tracer.start_span("cli.done", tags={"task_id": task_id, "promote": promote, "repo": repo_name}) as root_span:
+    with tracer.start_span("cli.done", tags={"task_id": task_id, "promote": promote, "repo": repo_name}, trace_id=resolved_trace_id) as root_span:
+        os.environ["MAESTRI_TRACE_ID"] = root_span.trace_id
+        os.environ["TRACEPARENT"] = root_span.context.to_traceparent()
         # Step 1: Feature commit
         staged = run_cmd("git diff --cached --name-only", cwd=repo_root).stdout.strip().splitlines()
         staged = [f.strip() for f in staged if f.strip() and not f.endswith(".agent/TASK.md")]
@@ -849,9 +887,14 @@ def cmd_done(
         # Reset active task
         updated = re.sub(r"(### 📌 Task )\[([^\]]+)\]:\s*([^\n]+)", r"\1[XX.Y]: [Short descriptive title]", updated, count=1)
         updated = re.sub(r"(-\s*\*\*Status:\*\*)[^\n]+", r"\1 READY FOR PLANNING", updated, count=1)
+        updated = re.sub(r"-\s*\*\*Trace ID:\*\*[^\n]+\n?", "", updated, flags=re.IGNORECASE)
 
         with open(task_file, "w", encoding="utf-8") as f:
             f.write(updated)
+
+        clear_active_trace(repo_root)
+        os.environ.pop("MAESTRI_TRACE_ID", None)
+        os.environ.pop("TRACEPARENT", None)
 
         gov_msg = f"docs(task): log completion of [{task_id}] and reset active task"
         with tracer.start_span("git.governance_commit", tags={"task_id": task_id, "repo": repo_name}):
@@ -904,6 +947,8 @@ def cmd_done(
                 "commit_hash": commit_hash,
                 "governance_commit": gov_hash,
                 "notify_planner": notify_planner,
+                "trace_id": root_span.trace_id,
+                "traceparent": root_span.context.to_traceparent(),
                 "repo": repo_name,
                 "repo_path": repo_root,
             }

@@ -23,6 +23,15 @@ class CodexRunner(TaskRunner):
 
         cmd_template = os.environ.get("TASKCTL_CODEX_CMD")
 
+        child_env = os.environ.copy()
+        trace_id = task_data.get("trace_id") or os.environ.get("MAESTRI_TRACE_ID") or os.environ.get("TASKCTL_TRACE_ID")
+        traceparent = task_data.get("traceparent") or os.environ.get("TRACEPARENT")
+        if trace_id:
+            child_env["MAESTRI_TRACE_ID"] = trace_id
+            child_env["TASKCTL_TRACE_ID"] = trace_id
+        if traceparent:
+            child_env["TRACEPARENT"] = traceparent
+
         try:
             if cmd_template:
                 cmd_str = cmd_template.format(
@@ -40,6 +49,7 @@ class CodexRunner(TaskRunner):
                     text=True,
                     timeout=timeout,
                     cwd=repo_path,
+                    env=child_env,
                     check=False,
                 )
                 if res.returncode == 0:
@@ -76,6 +86,7 @@ class CodexRunner(TaskRunner):
                     text=True,
                     timeout=timeout,
                     cwd=repo_path,
+                    env=child_env,
                     check=False,
                 )
                 if res.returncode == 0:

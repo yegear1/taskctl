@@ -15,6 +15,10 @@ from taskctl.telemetry.tracing import (
     generate_trace_id,
     generate_span_id,
     get_tracer,
+    normalize_trace_id,
+    save_active_trace,
+    load_active_trace,
+    clear_active_trace,
 )
 from taskctl.telemetry.events import TelemetryEvent
 from taskctl.telemetry.sink import TelemetryEmitter, VectorSink
@@ -206,6 +210,98 @@ class TestCliTraceCommand(unittest.TestCase):
             pass
         ret = cmd_trace(json_output=True, analytics=True)
         self.assertEqual(ret, 0)
+
+
+class TestNormalizeTraceId(unittest.TestCase):
+    def test_normalize_valid_32_hex(self):
+        raw = "4bf92f3577b34da6a3ce929d0e0e4736"
+        self.assertEqual(normalize_trace_id(raw), raw)
+        # Uppercase normalized to lowercase
+        self.assertEqual(normalize_trace_id(raw.upper()), raw)
+
+    def test_normalize_uuid_with_dashes(self):
+        uuid_str = "346ab552-34a8-4840-bdf8-5334c5055804"
+        expected = "346ab55234a84840bdf85334c5055804"
+        self.assertEqual(normalize_trace_id(uuid_str), expected)
+
+    def test_normalize_arbitrary_string(self):
+        raw = "custom-maestri-canvas-trace-1234"
+        norm = normalize_trace_id(raw)
+        self.assertIsNotNone(norm)
+        self.assertEqual(len(norm), 32)
+        self.assertTrue(all(c in "0123456789abcdef" for c in norm))
+        # Deterministic
+        self.assertEqual(normalize_trace_id(raw), norm)
+
+    def test_normalize_empty_or_none(self):
+        self.assertIsNone(normalize_trace_id(None))
+        self.assertIsNone(normalize_trace_id(""))
+        self.assertIsNone(normalize_trace_id("   "))
+
+
+class TestMaestriTraceContext(unittest.TestCase):
+    def setUp(self):
+        get_tracer().clear()
+        os.environ.pop("TRACEPARENT", None)
+        os.environ.pop("TASKCTL_TRACEPARENT", None)
+        os.environ.pop("MAESTRI_TRACEPARENT", None)
+        os.environ.pop("MAESTRI_TRACE_ID", None)
+        os.environ.pop("TASKCTL_TRACE_ID", None)
+
+    def test_start_span_with_maestri_trace_id(self):
+        tracer = Tracer()
+        uuid_str = "12345678-1234-1234-1234-123456789abc"
+        expected_trace_id = "12345678123412341234123456789abc"
+        with patch.dict(os.environ, {"MAESTRI_TRACE_ID": uuid_str, "TRACEPARENT": "", "TASKCTL_TRACEPARENT": ""}, clear=False):
+            with tracer.start_span("canvas.action") as span:
+                self.assertEqual(span.trace_id, expected_trace_id)
+
+    def test_start_span_with_maestri_traceparent(self):
+        tracer = Tracer()
+        valid_tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        with patch.dict(os.environ, {"MAESTRI_TRACEPARENT": valid_tp, "TRACEPARENT": "", "TASKCTL_TRACEPARENT": ""}, clear=False):
+            with tracer.start_span("canvas.action") as span:
+                self.assertEqual(span.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
+                self.assertEqual(span.parent_span_id, "00f067aa0ba902b7")
+
+    def test_start_span_with_explicit_trace_id(self):
+        tracer = Tracer()
+        with tracer.start_span("explicit.action", trace_id="11112222333344445555666677778888") as span:
+            self.assertEqual(span.trace_id, "11112222333344445555666677778888")
+
+
+class TestActiveTracePersistence(unittest.TestCase):
+    def test_save_load_clear_active_trace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ctx = TraceContext.new_root()
+            save_active_trace(tmpdir, "02.8", ctx)
+
+            # Successfully loaded
+            loaded = load_active_trace(tmpdir, expected_task_id="02.8")
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.trace_id, ctx.trace_id)
+            self.assertEqual(loaded.span_id, ctx.span_id)
+
+            # Mismatched task ID
+            mismatched = load_active_trace(tmpdir, expected_task_id="02.9")
+            self.assertIsNone(mismatched)
+
+            # Clear
+            clear_active_trace(tmpdir)
+            self.assertIsNone(load_active_trace(tmpdir, expected_task_id="02.8"))
+
+
+class TestDefaultTelemetryExporter(unittest.TestCase):
+    def test_tracer_exports_span_to_emitter(self):
+        exported_spans = []
+        emitter = TelemetryEmitter(emit_ndjson_stdout=False)
+        with patch("taskctl.telemetry.sink.get_telemetry_emitter", return_value=emitter):
+            with patch.object(emitter, "emit_span", side_effect=exported_spans.append) as mock_emit:
+                tracer = get_tracer()
+                with tracer.start_span("lifecycle.test") as span:
+                    span.set_tag("task_id", "02.8")
+
+                self.assertTrue(any(s.name == "lifecycle.test" for s in exported_spans))
 
 
 if __name__ == "__main__":

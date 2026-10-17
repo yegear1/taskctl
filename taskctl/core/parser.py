@@ -149,6 +149,9 @@ def parse_task_md(content: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         deps_match = re.search(r"-\s*\*\*(?:Depends On|Dependencies):\*\*\s*([^\n]+)", content, re.IGNORECASE)
         active_task["dependencies"] = extract_dependencies(deps_match.group(1)) if deps_match else []
 
+        trace_match = re.search(r"-\s*\*\*Trace ID:\*\*\s*([^\n]+)", content, re.IGNORECASE)
+        active_task["trace_id"] = trace_match.group(1).strip() if trace_match else ""
+
         crit_sec = re.search(r"### Acceptance Criteria[^\n]*\n(.*?)(?=\n---|\n## Completed Tasks Log|\n## Backlog|$)", content, re.DOTALL)
         criteria: List[Dict[str, Any]] = []
         if crit_sec:

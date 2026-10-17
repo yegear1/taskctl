@@ -32,6 +32,15 @@ class CustomRunner(TaskRunner):
             )
 
         try:
+            child_env = os.environ.copy()
+            trace_id = task_data.get("trace_id") or os.environ.get("MAESTRI_TRACE_ID") or os.environ.get("TASKCTL_TRACE_ID") or ""
+            traceparent = task_data.get("traceparent") or os.environ.get("TRACEPARENT") or ""
+            if trace_id:
+                child_env["MAESTRI_TRACE_ID"] = trace_id
+                child_env["TASKCTL_TRACE_ID"] = trace_id
+            if traceparent:
+                child_env["TRACEPARENT"] = traceparent
+
             cmd_str = cmd_template.format(
                 task_id=task_id,
                 title=task_data.get("title", ""),
@@ -42,6 +51,8 @@ class CustomRunner(TaskRunner):
                 repo_path=repo_path,
                 description=task_data.get("description", ""),
                 systems=task_data.get("systems", ""),
+                trace_id=trace_id,
+                traceparent=traceparent,
             )
             args = shlex.split(cmd_str)
             res = subprocess.run(
@@ -50,6 +61,7 @@ class CustomRunner(TaskRunner):
                 text=True,
                 timeout=timeout,
                 cwd=repo_path,
+                env=child_env,
                 check=False,
             )
             if res.returncode == 0:

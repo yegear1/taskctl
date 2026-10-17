@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextvars
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 import re
 import secrets
@@ -18,6 +20,29 @@ from typing import Any, Callable, Dict, List, Optional
 
 
 _W3C_TRACEPARENT_REGEX = re.compile(r"^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$")
+
+
+def normalize_trace_id(raw: Optional[str]) -> Optional[str]:
+    """Normalize raw trace ID string to standard 32-character lowercase hex W3C format.
+
+    Accepts:
+    - 32-character lowercase hex strings
+    - UUID strings (36 characters with hyphens, e.g. from Maestri / AGY)
+    - Arbitrary strings (deterministically hashed to 32 hex characters)
+
+    Returns None if raw is empty, whitespace-only, or None.
+    """
+    if not raw:
+        return None
+    val = raw.strip()
+    if not val:
+        return None
+
+    no_dashes = val.replace("-", "").lower()
+    if len(no_dashes) == 32 and all(c in "0123456789abcdef" for c in no_dashes) and no_dashes != "0" * 32:
+        return no_dashes
+
+    return hashlib.sha256(val.encode("utf-8")).hexdigest()[:32]
 
 
 def generate_trace_id() -> str:
@@ -99,6 +124,7 @@ class Span:
     tags: Dict[str, Any] = field(default_factory=dict)
     events: List[SpanEvent] = field(default_factory=list)
     _tracer: Optional[Tracer] = field(default=None, repr=False)
+    _prev_span: Optional[Span] = field(default=None, repr=False)
 
     @property
     def trace_id(self) -> str:
@@ -255,32 +281,53 @@ class Tracer:
         name: str,
         parent: Optional[Span | TraceContext] = None,
         tags: Optional[Dict[str, Any]] = None,
+        trace_id: Optional[str] = None,
     ) -> Span:
         """Start a new span.
         
         If parent is not specified, attempts to use the active span context,
-        or looks up external TRACEPARENT / TASKCTL_TRACE_ID env vars,
+        or looks up external TRACEPARENT / TASKCTL_TRACEPARENT / MAESTRI_TRACEPARENT,
+        or looks up TASKCTL_TRACE_ID / MAESTRI_TRACE_ID / explicit trace_id,
         otherwise creates a new root context.
         """
         active_span = self.get_current_span()
         ctx: TraceContext
 
-        if isinstance(parent, Span):
+        if trace_id:
+            norm_id = normalize_trace_id(trace_id)
+            if norm_id:
+                parent_id = parent.span_id if isinstance(parent, (Span, TraceContext)) else (active_span.span_id if active_span else None)
+                ctx = TraceContext(
+                    trace_id=norm_id,
+                    span_id=generate_span_id(),
+                    parent_span_id=parent_id,
+                )
+            else:
+                ctx = TraceContext.new_root()
+        elif isinstance(parent, Span):
             ctx = parent.context.child_context()
         elif isinstance(parent, TraceContext):
             ctx = parent.child_context()
         elif active_span is not None:
             ctx = active_span.context.child_context()
         else:
-            env_tp = os.environ.get("TRACEPARENT") or os.environ.get("TASKCTL_TRACEPARENT")
+            env_tp = (
+                os.environ.get("TRACEPARENT")
+                or os.environ.get("TASKCTL_TRACEPARENT")
+                or os.environ.get("MAESTRI_TRACEPARENT")
+            )
             parsed_tp = TraceContext.from_traceparent(env_tp)
             if parsed_tp:
                 ctx = parsed_tp.child_context()
             else:
-                explicit_trace_id = os.environ.get("TASKCTL_TRACE_ID")
-                if explicit_trace_id and len(explicit_trace_id.strip()) == 32:
+                raw_trace_id = (
+                    os.environ.get("TASKCTL_TRACE_ID")
+                    or os.environ.get("MAESTRI_TRACE_ID")
+                )
+                norm_id = normalize_trace_id(raw_trace_id)
+                if norm_id:
                     ctx = TraceContext(
-                        trace_id=explicit_trace_id.strip(),
+                        trace_id=norm_id,
                         span_id=generate_span_id(),
                         parent_span_id=None,
                     )
@@ -292,6 +339,7 @@ class Tracer:
             context=ctx,
             tags=dict(tags or {}),
             _tracer=self,
+            _prev_span=active_span,
         )
         span.set_tag("service", self.service_name)
         _CURRENT_SPAN.set(span)
@@ -301,8 +349,7 @@ class Tracer:
         """Called when a span completes."""
         active = _CURRENT_SPAN.get()
         if active is span:
-            # Pop active span or reset
-            _CURRENT_SPAN.set(None)
+            _CURRENT_SPAN.set(span._prev_span)
 
         self._completed_spans.append(span)
         if len(self._completed_spans) > self._max_history:
@@ -361,8 +408,9 @@ class Tracer:
         return list(self._completed_spans)
 
     def clear(self) -> None:
-        """Clear span buffer."""
+        """Clear span buffer and reset active span."""
         self._completed_spans.clear()
+        _CURRENT_SPAN.set(None)
 
 
 class DurationAnalyzer:
@@ -437,6 +485,74 @@ class DurationAnalyzer:
         return "\n".join(lines)
 
 
+def get_active_trace_path(repo_path: Optional[str] = None) -> str:
+    """Return path to cached active trace JSON file for the repository."""
+    from taskctl.core.parser import resolve_repo_path
+    base = resolve_repo_path(repo_path)
+    return os.path.join(base, ".agent", ".cache", "active_trace.json")
+
+
+def save_active_trace(repo_path: str, task_id: str, context: TraceContext) -> None:
+    """Persist active task trace context to .agent/.cache/active_trace.json (fail-safe)."""
+    try:
+        path = get_active_trace_path(repo_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            "task_id": task_id,
+            "trace_id": context.trace_id,
+            "span_id": context.span_id,
+            "parent_span_id": context.parent_span_id,
+            "traceparent": context.to_traceparent(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except Exception:
+        pass
+
+
+def load_active_trace(repo_path: Optional[str] = None, expected_task_id: Optional[str] = None) -> Optional[TraceContext]:
+    """Load cached active trace context if it exists and matches expected_task_id (fail-safe)."""
+    try:
+        path = get_active_trace_path(repo_path)
+        if not os.path.isfile(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if expected_task_id and data.get("task_id") != expected_task_id:
+            return None
+        trace_id = data.get("trace_id")
+        span_id = data.get("span_id")
+        if not trace_id or not span_id:
+            return None
+        return TraceContext(
+            trace_id=trace_id,
+            span_id=span_id,
+            parent_span_id=data.get("parent_span_id"),
+        )
+    except Exception:
+        return None
+
+
+def clear_active_trace(repo_path: Optional[str] = None) -> None:
+    """Remove cached active trace context file upon task completion (fail-safe)."""
+    try:
+        path = get_active_trace_path(repo_path)
+        if os.path.isfile(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def _default_telemetry_exporter(span: Span) -> None:
+    """Fail-safe default exporter piping completed spans to Vector/VictoriaLogs."""
+    try:
+        from taskctl.telemetry.sink import get_telemetry_emitter
+        get_telemetry_emitter().emit_span(span)
+    except Exception:
+        pass
+
+
 _GLOBAL_TRACER: Optional[Tracer] = None
 
 
@@ -444,5 +560,5 @@ def get_tracer() -> Tracer:
     """Retrieve or initialize the global Tracer instance."""
     global _GLOBAL_TRACER
     if _GLOBAL_TRACER is None:
-        _GLOBAL_TRACER = Tracer()
+        _GLOBAL_TRACER = Tracer(exporter=_default_telemetry_exporter)
     return _GLOBAL_TRACER

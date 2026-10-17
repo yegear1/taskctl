@@ -110,5 +110,17 @@ class TestParser(unittest.TestCase):
         self.assertTrue(os.path.isfile(task_file))
         self.assertTrue(task_file.endswith("TASK.md"))
 
+    def test_parse_task_md_with_trace_id(self):
+        task_md_trace = """# Tasks
+### 📌 Task [01.2]: Feature Title Here
+- **Description:** Sample
+- **Status:** RUNNING
+- **Trace ID:** 4bf92f3577b34da6a3ce929d0e0e4736
+"""
+        active, _ = parse_task_md(task_md_trace)
+        self.assertEqual(active["id"], "01.2")
+        self.assertEqual(active["trace_id"], "4bf92f3577b34da6a3ce929d0e0e4736")
+
+
 if __name__ == "__main__":
     unittest.main()

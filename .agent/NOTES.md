@@ -108,6 +108,11 @@
 - **Decision:** Implement `KnowledgeEngine` and `parse_knowledge_card` in `taskctl.core.knowledge` using SQLite FTS5 (`porter unicode61` tokenizer) and BM25 ranking (`.agent/.cache/knowledge.db`). Support incremental mtime synchronization, graceful fail-open when `.agent/knowledge/` is absent, and error signature reflex evaluation against stack traces. Expose CLI subcommands `taskctl recall` (FTS5 BM25 search) and `taskctl reflex` (headless error analysis).
 - **Consequences:** Sub-millisecond knowledge lookup (<0.2ms), zero third-party dependencies, and automated remediation guidance for developers and future `agent-guard` interception.
 
+### 2026-10-17 Context Propagation & Trace Genesis (MAESTRI_TRACE_ID in Lifecycle Spans)
+- **Context:** Ensuring end-to-end distributed trace continuity and W3C TraceContext adherence across multi-agent cycles between `taskctl next` ($t_0$) and `taskctl done` ($t_1$), canvas agents, and runner subprocesses.
+- **Decision:** Implement trace genesis and ID normalization (`normalize_trace_id`) supporting standard 32-hex, UUID (36 chars with dashes), and arbitrary strings. Support `MAESTRI_TRACE_ID` and `MAESTRI_TRACEPARENT` env vars. Persist active task trace context to `.agent/.cache/active_trace.json` and optional `- **Trace ID:**` in `TASK.md`. Forward trace context in task data, canvas hand-off prompts, and runner subprocess environments (Codex, Custom). Automatically export all completed lifecycle spans to VictoriaLogs via `TelemetryEmitter`.
+- **Consequences:** Deterministic, continuous distributed tracing across distributed multi-agent handoffs and CLI sessions with zero external dependencies.
+
 ---
 
 ## Active Contracts
@@ -115,6 +120,7 @@
 | Channel / Route | Producer | Consumer | Payload |
 |---|---|---|---|
 | `.agent/TASK.md` | `taskctl` / Agent | `taskctl.core.parser` | Markdown AST task schema |
+| `.agent/.cache/active_trace.json` | `taskctl next` | `taskctl done` / CLI | Ephemeral W3C active trace context |
 | `taskctl audit` | `taskctl` | CI / Git Pre-commit | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: REJECTED` |
 | `taskctl lint-commit` | `taskctl` | Git `commit-msg` / CI | Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED` |
 | `taskctl graph` | `taskctl` | CLI / CI / Worktree Runners / Docs | ASCII Tree, Mermaid `graph TD`, JSON, Agnostic Execution Plan (`--export-plan`), Exit Code (`0: Clean`, `1: Cycle`) |
