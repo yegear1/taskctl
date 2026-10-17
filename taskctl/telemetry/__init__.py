@@ -36,6 +36,11 @@ __all__ = [
     "SessionTokenRecord",
     "RoleTokenAggregation",
     "collect_token_telemetry",
+    "VictoriaLogsClient",
+    "TaskTraceAggregator",
+    "TaskCycleSummary",
+    "render_cycle_summary",
+    "render_cycle_waterfall",
 ]
 
 
@@ -67,4 +72,13 @@ def __getattr__(name: str):
     ):
         from taskctl.telemetry import tokens
         return getattr(tokens, name)
+    if name in (
+        "VictoriaLogsClient",
+        "TaskTraceAggregator",
+        "TaskCycleSummary",
+        "render_cycle_summary",
+        "render_cycle_waterfall",
+    ):
+        from taskctl.telemetry import victorialogs
+        return getattr(victorialogs, name)
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

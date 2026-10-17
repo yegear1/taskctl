@@ -873,6 +873,78 @@ def sync_hud_note(hud_content: str, note_title: str = "hud") -> bool:
     return False
 
 
+def sync_audit_report_note(content: str, note_title: str = "audit-report") -> bool:
+    """Sync Scope Auditor report / remediation markdown to canvas note."""
+    return sync_hud_note(content, note_title=note_title)
+
+
+def dispatch_audit_remediation(
+    remediation_package: Any,
+    target_agent: Optional[str] = None,
+    timeout: float = 5.0,
+) -> bool:
+    """Dispatch structured remediation package to Developer agent on Maestri canvas via socket."""
+    pkg_dict = remediation_package.to_dict() if hasattr(remediation_package, "to_dict") else {}
+    task_id = pkg_dict.get("task_id", "XX.Y")
+    task_title = pkg_dict.get("task_title", "Active Task")
+    markdown_content = (
+        remediation_package.format_markdown()
+        if hasattr(remediation_package, "format_markdown")
+        else str(remediation_package)
+    )
+
+    # 1. Sync canvas note
+    sync_audit_report_note(markdown_content)
+
+    # 2. Ambient notification
+    target_display = target_agent or "Developer"
+    send_canvas_notification(
+        f"⚠️ [AUDIT REMEDIATION] Task [{task_id}] '{task_title}' requires changes -> Dispatched to {target_display}"
+    )
+
+    # 3. Prompt candidate agent
+    candidates = [target_agent] if target_agent else ["Developer", "Builder", "Implementer", "Worker-1"]
+    prompt = (
+        f"[SCOPE AUDITOR REMEDIATION PACKAGE: CHANGES REQUIRED]\n"
+        f"Task [{task_id}]: {task_title}\n\n"
+        f"{markdown_content}\n\n"
+        f"Please apply the prescribed fixes above immediately and re-run 'taskctl audit'."
+    )
+
+    delivered = False
+    for cand in candidates:
+        if not cand:
+            continue
+        try:
+            resp = ask_agent(cand, prompt, timeout=int(timeout))
+            if resp is not None:
+                delivered = True
+                break
+        except Exception:
+            continue
+
+    try:
+        emitter = get_telemetry_emitter()
+        emitter.emit_lifecycle_event(
+            event_type="audit_remediation",
+            task_id=task_id,
+            message=f"Audit remediation package dispatched for [{task_id}]: delivered={delivered}",
+            status="DELIVERED" if delivered else "DEGRADED",
+            duration_ms=0.0,
+            level="info" if delivered else "warn",
+            details={
+                "task_id": task_id,
+                "delivered": delivered,
+                "candidates": candidates,
+                "action_count": len(pkg_dict.get("actions", [])),
+            },
+        )
+    except Exception:
+        pass
+
+    return delivered
+
+
 def generate_hud_markdown(repo_path: Optional[str] = None) -> str:
     """Compile real-time HUD telemetry markdown from active task, multigravity quota, and git workbench."""
     from taskctl.core.parser import resolve_repo_path, get_task_file, parse_task_md

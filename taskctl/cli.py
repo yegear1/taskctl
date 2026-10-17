@@ -15,9 +15,10 @@ Commands:
   taskctl next [--weight] [--agent <name>] [--no-handoff] [--repo <path|name>] [--runner <name>]
                            Promote next backlog task to active (RUNNING) and dispatch
                            lifecycle hand-off or runner execution (maestri, multigravity, codex, custom).
-  taskctl audit [--delegate] [--agent <name>] [--domain-lint] [--repo <path|name>]
+  taskctl audit [--delegate] [--agent <name>] [--domain-lint] [--fix] [--repo <path|name>]
                            Trigger Scope Auditor to verify diff with optional canvas
-                           agent delegation fallback. --domain-lint (or
+                           agent delegation fallback. --fix synthesizes and dispatches an
+                           automated remediation package to Developer. --domain-lint (or
                            TASKCTL_DOMAIN_LINT=1) also checks acceptance criteria.
                            Returns semantic exit codes:
                              0: [APPROVED] - Ready for taskctl done.
@@ -42,6 +43,9 @@ Commands:
                            workspaces and broadcast live events to Vector, Canvas, and Webhooks.
   taskctl broadcast [msg] [--watch <path>...] [--json]
                            Aggregate cross-repo status roll-up and broadcast to configured sinks.
+  taskctl trace [XX.Y] [--id <id>] [--last] [--time-range <range>] [--repo <path>] [--json] [--analytics]
+                           Aggregate and visualize task cycle lifecycle spans from VictoriaLogs (LogsQL)
+                           or local tracer fallback with timeline, blocked commands, and token summary.
   taskctl notify <msg>     Send an ad-hoc notification via configured webhook.
   taskctl tokens [--profile <p>] [--role <r>] [--repo <path>] [--json] [--detailed]
                            Aggregate multi-agent token consumption partitioned by Profile and Role.
@@ -73,7 +77,14 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from taskctl.core.parser import find_repo_root, get_task_file, parse_task_md, resolve_repo_path
-from taskctl.core.auditor import ScopeAuditor, AuditSeverity, domain_lint_enabled
+from taskctl.core.auditor import (
+    ScopeAuditor,
+    AuditSeverity,
+    domain_lint_enabled,
+    remediate_mechanical,
+    generate_remediation_package,
+    RemediationPackage,
+)
 from taskctl.core.commits import parse_conventional_commit
 from taskctl.core.knowledge import KnowledgeEngine, KnowledgeCard
 from taskctl.core.worktree import (
@@ -102,6 +113,8 @@ from taskctl.providers.maestri import (
     handoff_task_done,
     sync_hud_note,
     generate_hud_markdown,
+    sync_audit_report_note,
+    dispatch_audit_remediation,
 )
 from taskctl.webhooks.dispatcher import WebhookDispatcher
 from taskctl.telemetry import (
@@ -118,6 +131,10 @@ from taskctl.telemetry import (
     save_active_trace,
     load_active_trace,
     clear_active_trace,
+    VictoriaLogsClient,
+    TaskTraceAggregator,
+    TaskCycleSummary,
+    render_cycle_summary,
 )
 from taskctl.runners import get_runner, list_runners, RunnerResult
 from taskctl.tui import Dashboard
@@ -570,6 +587,7 @@ def cmd_audit(
     delegate: bool = False,
     agent_name: Optional[str] = None,
     domain_lint: bool = False,
+    fix: bool = False,
     repo: Optional[str] = None,
 ) -> int:
     from pathlib import Path
@@ -594,8 +612,9 @@ def cmd_audit(
     with tracer.start_span("cli.audit", tags={"task_id": active_task.get("id", "XX.Y"), "hybrid": delegate, "repo": repo_path.name}) as root_span:
         mode_label = f" [HYBRID / DELEGATED to {agent_name or 'Auditor'}]" if delegate else ""
         repo_label = f" [{repo_path.name}]" if repo else ""
+        fix_label = " [--fix / AUTO-REMEDIATION]" if fix else ""
         print("\n" + "="*58)
-        print(f" 🛡️ SCOPE AUDITOR VERIFICATION{repo_label}{mode_label}")
+        print(f" 🛡️ SCOPE AUDITOR VERIFICATION{repo_label}{mode_label}{fix_label}")
         print("="*58)
         if repo:
             print(f" Repository   : {repo_path}")
@@ -608,6 +627,13 @@ def cmd_audit(
             domain_lint=domain_lint_on,
         )
         verdict = auditor.run(repo_path)
+
+        auto_fixed: List[str] = []
+        if fix and verdict.exit_code != 0:
+            auto_fixed = remediate_mechanical(repo_path, verdict.results)
+            if auto_fixed:
+                verdict = auditor.run(repo_path)
+
         audit_duration_ms = (time.perf_counter() - start_audit) * 1000.0
 
         for res in verdict.results:
@@ -622,6 +648,37 @@ def cmd_audit(
         print("-" * 58)
         print(f" FINAL VERDICT: [{verdict.status}] (exit code {verdict.exit_code})")
         print("=" * 58 + "\n")
+
+        remediation_pkg: Optional[RemediationPackage] = None
+        if fix and verdict.exit_code != 0:
+            remediation_pkg = generate_remediation_package(verdict, repo_path, auto_fixed=auto_fixed)
+            print("="*58)
+            print(" 🛠️  AUTO-REMEDIATION COCKPIT (taskctl audit --fix)")
+            print("="*58)
+            if auto_fixed:
+                print(" ⚡ Automatically Resolved Fixes:")
+                for item in auto_fixed:
+                    print(f"   [FIXED] {item}")
+            if remediation_pkg.actions:
+                print(" ⚠️  Pending Required Corrections:")
+                for act in remediation_pkg.actions:
+                    print(f"   • [{act.rule_name}] {act.diagnosis}")
+                    print(f"     👉 Solution: {act.suggested_fix}")
+                    if act.remediation_command:
+                        print(f"     👉 Command : {act.remediation_command}")
+            if remediation_pkg.knowledge_remedies:
+                print(" 🧠 Matched Knowledge Base Cards:")
+                for k in remediation_pkg.knowledge_remedies:
+                    print(f"   • [{k.get('id')}] {k.get('title')}")
+            print("-" * 58)
+
+            target_dev = agent_name or "Developer"
+            dispatched = dispatch_audit_remediation(remediation_pkg, target_agent=target_dev)
+            if dispatched:
+                print(f" [OK] Remediation package dispatched to canvas agent '{target_dev}' via socket.")
+            else:
+                print(f" [NOTE] Canvas agent offline or unreachable. Remediation recorded in audit-report note.")
+            print("=" * 58 + "\n")
 
         root_span.set_status("OK" if verdict.exit_code == 0 else "ERROR", verdict.status)
         root_span.set_tag("exit_code", verdict.exit_code)
@@ -1277,51 +1334,87 @@ def cmd_broadcast(
     return 0
 
 def cmd_trace(
+    task_id: Optional[str] = None,
     trace_id: Optional[str] = None,
     last: bool = False,
+    time_range: str = "7d",
+    repo: Optional[str] = None,
     json_output: bool = False,
     analytics: bool = False,
 ) -> int:
     import json
+    from taskctl.core.parser import resolve_repo_path
+
+    repo_root = resolve_repo_path(repo)
+    clean_task_id = task_id.strip("[]") if task_id else None
+
     tracer = get_tracer()
     spans = tracer.get_completed_spans()
 
-    if not spans:
+    target_trace_id = trace_id
+    if not target_trace_id and last and spans:
+        target_trace_id = spans[-1].trace_id
+
+    aggregator = TaskTraceAggregator(tracer=tracer)
+    summary = aggregator.aggregate_task_cycle(
+        task_id=clean_task_id,
+        trace_id=target_trace_id,
+        time_range=time_range,
+        repo_root=repo_root,
+    )
+
+    if not summary.timeline and summary.task_id == "XX.Y" and not summary.trace_id and not spans:
         print("[INFO] No telemetry spans currently in memory.")
         return 0
 
-    target_trace_id = trace_id
-    if not target_trace_id and last:
-        target_trace_id = spans[-1].trace_id
-
-    selected_spans = tracer.get_completed_spans(trace_id=target_trace_id) if target_trace_id else spans
-
     if json_output:
-        payload = [s.to_dict() for s in selected_spans]
+        data = summary.to_dict()
         if analytics:
-            stats = DurationAnalyzer.analyze_spans(selected_spans)
-            print(json.dumps({"trace_id": target_trace_id, "analytics": stats, "spans": payload}, indent=2))
-        else:
-            print(json.dumps(payload, indent=2))
+            if summary.timeline:
+                spans_like = [
+                    Span(
+                        name=item["name"],
+                        context=TraceContext(
+                            trace_id=summary.trace_id or "0" * 32,
+                            span_id=item.get("span_id", "0" * 16),
+                        ),
+                        start_time_ns=0,
+                        end_time_ns=int(item["duration_ms"] * 1_000_000),
+                        status=item["status"],
+                    )
+                    for item in summary.timeline
+                ]
+                data["analytics"] = DurationAnalyzer.analyze_spans(spans_like)
+            else:
+                data["analytics"] = DurationAnalyzer.analyze_spans([])
+        print(json.dumps(data, indent=2))
         return 0
 
-    print("\n" + "=" * 58)
-    print(f" ⏱️  DISTRIBUTED TRACE INSPECTOR")
-    if target_trace_id:
-        print(f" Trace ID: {target_trace_id}")
-    print("=" * 58)
-    print(DurationAnalyzer.render_tree(selected_spans))
+    print(render_cycle_summary(summary))
 
-    if analytics:
-        stats = DurationAnalyzer.analyze_spans(selected_spans)
-        print("-" * 58)
+    if analytics and summary.timeline:
+        spans_like = [
+            Span(
+                name=item["name"],
+                context=TraceContext(
+                    trace_id=summary.trace_id or "0" * 32,
+                    span_id=item.get("span_id", "0" * 16),
+                ),
+                start_time_ns=0,
+                end_time_ns=int(item["duration_ms"] * 1_000_000),
+                status=item["status"],
+            )
+            for item in summary.timeline
+        ]
+        stats = DurationAnalyzer.analyze_spans(spans_like)
+        print("-" * 62)
         print(f" Total Spans    : {stats['total_spans']}")
         print(f" Total Duration : {stats['total_duration_ms']:.2f}ms")
         print(f" Avg Duration   : {stats['avg_duration_ms']:.2f}ms")
         print(f" Max Duration   : {stats['max_duration_ms']:.2f}ms")
         print(f" Min Duration   : {stats['min_duration_ms']:.2f}ms")
+        print("=" * 62 + "\n")
 
-    print("=" * 58 + "\n")
     return 0
 
 def cmd_guard(subcmd: str, args: List[str]) -> int:
@@ -2105,6 +2198,7 @@ def main():
         delegate = False
         agent_name = None
         domain_lint = False
+        fix = False
         repo = None
         args = sys.argv[2:]
         i = 0
@@ -2115,6 +2209,9 @@ def main():
             elif args[i] in ["--domain-lint"]:
                 domain_lint = True
                 i += 1
+            elif args[i] in ["--fix", "-f"]:
+                fix = True
+                i += 1
             elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
                 agent_name = args[i + 1]
                 delegate = True
@@ -2124,7 +2221,7 @@ def main():
                 i += 2
             else:
                 i += 1
-        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name, domain_lint=domain_lint, repo=repo))
+        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name, domain_lint=domain_lint, fix=fix, repo=repo))
     elif cmd == "done":
         promote = False
         custom_msg = None
@@ -2376,15 +2473,34 @@ def main():
             broadcast_webhook=broadcast_webhook,
         ))
     elif cmd == "trace":
+        task_id = None
         trace_id = None
         last = False
+        time_range = "7d"
+        repo = None
         json_output = False
         analytics = False
         args = sys.argv[2:]
+        if "-h" in args or "--help" in args or "help" in args:
+            print("Usage: taskctl trace [XX.Y] [options]")
+            print("  taskctl trace 02.8")
+            print("  taskctl trace [02.8] --json")
+            print("  taskctl trace --id <trace_id> [--analytics]")
+            print("  taskctl trace --last [--time-range 24h] [--repo <path>]")
+            sys.exit(0)
         i = 0
         while i < len(args):
             if args[i] in ["--id", "-i"] and i + 1 < len(args):
                 trace_id = args[i + 1]
+                i += 2
+            elif args[i] in ["--task", "-t"] and i + 1 < len(args):
+                task_id = args[i + 1]
+                i += 2
+            elif args[i] in ["--time-range", "--time", "-T"] and i + 1 < len(args):
+                time_range = args[i + 1]
+                i += 2
+            elif args[i] in ["--repo", "-r"] and i + 1 < len(args):
+                repo = args[i + 1]
                 i += 2
             elif args[i] in ["--last", "-l"]:
                 last = True
@@ -2395,14 +2511,24 @@ def main():
             elif args[i] in ["--analytics", "-a"]:
                 analytics = True
                 i += 1
-            elif not args[i].startswith("-") and trace_id is None:
-                trace_id = args[i]
+            elif not args[i].startswith("-"):
+                val = args[i].strip()
+                if re.match(r"^\[?[0-9]{2}\.[0-9]+(\.[0-9]+)?\]?$", val) or val.startswith("["):
+                    task_id = val.strip("[]")
+                elif trace_id is None and task_id is None:
+                    if "." in val and len(val) <= 10:
+                        task_id = val.strip("[]")
+                    else:
+                        trace_id = val
                 i += 1
             else:
                 i += 1
         sys.exit(cmd_trace(
+            task_id=task_id,
             trace_id=trace_id,
             last=last,
+            time_range=time_range,
+            repo=repo,
             json_output=json_output,
             analytics=analytics,
         ))

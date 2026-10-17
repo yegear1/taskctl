@@ -267,6 +267,7 @@ class TestCLIMainRepoParsing(unittest.TestCase):
                     delegate=False,
                     agent_name=None,
                     domain_lint=True,
+                    fix=False,
                     repo=self.repo,
                 )
 

@@ -60,6 +60,95 @@ class AuditVerdict:
         return self.exit_code == 0
 
 
+@dataclass
+class RemediationAction:
+    """Actionable remediation item derived from an audit rule failure."""
+
+    rule_name: str
+    severity: AuditSeverity
+    diagnosis: str
+    suggested_fix: str
+    remediation_command: Optional[str] = None
+    affected_files: List[str] = field(default_factory=list)
+    auto_fixed: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "rule_name": self.rule_name,
+            "severity": self.severity.label,
+            "diagnosis": self.diagnosis,
+            "suggested_fix": self.suggested_fix,
+            "remediation_command": self.remediation_command,
+            "affected_files": self.affected_files,
+            "auto_fixed": self.auto_fixed,
+        }
+
+
+@dataclass
+class RemediationPackage:
+    """Self-contained remediation payload dispatched to Developer for automated correction."""
+
+    task_id: str
+    task_title: str
+    status: str
+    exit_code: int
+    actions: List[RemediationAction] = field(default_factory=list)
+    knowledge_remedies: List[Dict[str, Any]] = field(default_factory=list)
+    auto_fixed_items: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "task_title": self.task_title,
+            "status": self.status,
+            "exit_code": self.exit_code,
+            "actions": [a.to_dict() for a in self.actions],
+            "knowledge_remedies": self.knowledge_remedies,
+            "auto_fixed_items": self.auto_fixed_items,
+        }
+
+    def format_markdown(self) -> str:
+        """Render remediation package into token-dense machine-parseable markdown for agents."""
+        lines = [
+            f"# 🛠️ Audit Remediation Package: Task [{self.task_id}]",
+            f"**Task Title:** {self.task_title}",
+            f"**Audit Status:** [{self.status}] (Exit code: {self.exit_code})",
+            "",
+        ]
+        if self.auto_fixed_items:
+            lines.append("### ⚡ Automatically Resolved Mechanical Fixes:")
+            for item in self.auto_fixed_items:
+                lines.append(f"- ✅ {item}")
+            lines.append("")
+
+        if self.actions:
+            lines.append("### ⚠️ Required Corrections for Developer Agent:")
+            for a in self.actions:
+                status_icon = "✅" if a.auto_fixed else "❌"
+                lines.append(f"#### {status_icon} Rule: `{a.rule_name}` [{a.severity.label}]")
+                lines.append(f"- **Diagnosis:** {a.diagnosis}")
+                lines.append(f"- **Suggested Fix:** {a.suggested_fix}")
+                if a.remediation_command:
+                    lines.append(f"- **Recommended Command:** `{a.remediation_command}`")
+                if a.affected_files:
+                    lines.append(f"- **Affected Files:** {', '.join(a.affected_files)}")
+                lines.append("")
+
+        if self.knowledge_remedies:
+            lines.append("### 🧠 Approved Knowledge Base Remedies:")
+            for k in self.knowledge_remedies:
+                lines.append(f"- **[{k.get('id', 'K-???')}] {k.get('title', '')}** ({k.get('type', 'gotcha')})")
+                sol = k.get("solution", "")
+                if sol:
+                    clean_sol = sol.strip().replace("\n", " ")[:200]
+                    lines.append(f"  *Solution:* {clean_sol}...")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("👉 **Developer Instructions:** Apply the corrective actions above and re-verify with `taskctl audit`.")
+        return "\n".join(lines)
+
+
 class GitHygieneRule:
     """Verifies that working tree / staged changes have no conflict markers or whitespace errors."""
 
@@ -748,3 +837,155 @@ class ScopeAuditor:
             exit_code=int(max_severity),
             results=results,
         )
+
+
+def remediate_mechanical(repo_path: Path, results: List[RuleResult]) -> List[str]:
+    """Attempt safe deterministic mechanical fixes for known failures."""
+    auto_fixed: List[str] = []
+    for r in results:
+        if r.severity == AuditSeverity.APPROVED:
+            continue
+        if r.rule_name == "git-hygiene":
+            try:
+                # 1. Attempt whitespace fix on unstaged git diff
+                diff_res = subprocess.run(
+                    ["git", "diff"],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if diff_res.stdout.strip():
+                    fix_res = subprocess.run(
+                        ["git", "apply", "--whitespace=fix"],
+                        input=diff_res.stdout,
+                        cwd=str(repo_path),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if fix_res.returncode == 0:
+                        chk = subprocess.run(
+                            ["git", "diff", "--check"],
+                            cwd=str(repo_path),
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        if chk.returncode == 0:
+                            auto_fixed.append("Resolved trailing whitespace errors via 'git apply --whitespace=fix'")
+            except Exception:
+                pass
+    return auto_fixed
+
+
+def generate_remediation_package(
+    verdict: AuditVerdict,
+    repo_path: Path,
+    auto_fixed: Optional[List[str]] = None,
+) -> RemediationPackage:
+    """Synthesize a structured remediation package from audit results and reflex knowledge cards."""
+    task_file = repo_path / ".agent" / "TASK.md"
+    task_id = "XX.Y"
+    task_title = "Active Task"
+    if task_file.exists():
+        try:
+            active_task, _ = parse_task_md(task_file.read_text(encoding="utf-8"))
+            if active_task:
+                task_id = active_task.get("id", "XX.Y")
+                task_title = active_task.get("title", "Active Task")
+        except Exception:
+            pass
+
+    actions: List[RemediationAction] = []
+    error_texts: List[str] = []
+
+    for r in verdict.results:
+        if r.severity == AuditSeverity.APPROVED:
+            continue
+        error_texts.append(f"{r.rule_name}: {r.message}")
+        cmd: Optional[str] = None
+        sug = r.message
+        affected: List[str] = []
+
+        if r.rule_name == "git-hygiene":
+            cmd = "git diff --check"
+            sug = "Clean trailing whitespaces and conflict markers from working tree."
+            errs = r.details.get("errors", [])
+            for e in errs:
+                if ":" in e:
+                    affected.append(e.split(":")[0].strip())
+        elif r.rule_name == "task-contract":
+            sug = "Ensure .agent/TASK.md has a valid Task ID [XX.Y], title, and Status in [READY FOR PLANNING, PLANNING, RUNNING]."
+            affected = [".agent/TASK.md"]
+        elif r.rule_name == "syntax-compilation":
+            cmd = "python3 -m py_compile <scripts>"
+            sug = "Resolve Python syntax errors reported by py_compile in affected files."
+            affected = r.details.get("failed_files", [])
+        elif r.rule_name == "secrets-boundary":
+            sug = "Remove detected secret files, API tokens, or private keys from git working tree."
+            affected = r.details.get("detected_secrets", [])
+        elif r.rule_name == "commit-convention":
+            cmd = "taskctl lint-commit <msg>"
+            sug = "Format the latest commit message according to Conventional Commits: 'type(scope): description'."
+        elif r.rule_name == "scope-boundary":
+            cmd = "git checkout -- <file>"
+            sug = "Revert unapproved modifications outside declared Systems Involved or update TASK.md Systems Involved."
+            affected = r.details.get("out_of_scope", [])
+        elif r.rule_name == "acceptance-criteria":
+            sug = "Complete all remaining unchecked acceptance criteria in .agent/TASK.md."
+            affected = [".agent/TASK.md"]
+
+        actions.append(
+            RemediationAction(
+                rule_name=r.rule_name,
+                severity=r.severity,
+                diagnosis=r.message,
+                suggested_fix=sug,
+                remediation_command=cmd,
+                affected_files=affected,
+            )
+        )
+
+    # Query Knowledge Cards via reflex or recall
+    knowledge_remedies: List[Dict[str, Any]] = []
+    try:
+        from taskctl.core.knowledge import KnowledgeEngine
+        k_engine = KnowledgeEngine(repo_path=str(repo_path))
+        query_text = " ".join(error_texts)
+        reflex_matches = k_engine.reflex(query_text, limit=3)
+        for card, score, matched in reflex_matches:
+            knowledge_remedies.append({
+                "id": card.id,
+                "title": card.title,
+                "type": card.type,
+                "problem": card.problem,
+                "solution": card.solution,
+                "score": score,
+                "matched_keywords": matched,
+            })
+        if not knowledge_remedies and error_texts:
+            for text in error_texts[:2]:
+                recall_matches = k_engine.recall(text, limit=2)
+                for card, score in recall_matches:
+                    if not any(k["id"] == card.id for k in knowledge_remedies):
+                        knowledge_remedies.append({
+                            "id": card.id,
+                            "title": card.title,
+                            "type": card.type,
+                            "problem": card.problem,
+                            "solution": card.solution,
+                            "score": score,
+                        })
+    except Exception:
+        pass
+
+    return RemediationPackage(
+        task_id=task_id,
+        task_title=task_title,
+        status=verdict.status,
+        exit_code=verdict.exit_code,
+        actions=actions,
+        knowledge_remedies=knowledge_remedies,
+        auto_fixed_items=auto_fixed or [],
+    )

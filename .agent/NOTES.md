@@ -113,6 +113,11 @@
 - **Decision:** Implement trace genesis and ID normalization (`normalize_trace_id`) supporting standard 32-hex, UUID (36 chars with dashes), and arbitrary strings. Support `MAESTRI_TRACE_ID` and `MAESTRI_TRACEPARENT` env vars. Persist active task trace context to `.agent/.cache/active_trace.json` and optional `- **Trace ID:**` in `TASK.md`. Forward trace context in task data, canvas hand-off prompts, and runner subprocess environments (Codex, Custom). Automatically export all completed lifecycle spans to VictoriaLogs via `TelemetryEmitter`.
 - **Consequences:** Deterministic, continuous distributed tracing across distributed multi-agent handoffs and CLI sessions with zero external dependencies.
 
+### 2026-10-17 VictoriaLogs LogsQL Aggregation & Trace CLI
+- **Context:** Aggregating complete multi-agent task cycle lifecycles ($t_0$ to $t_1$) across distributed phases (`cli.next`, `runner.execute`, `cli.audit`, `git commits`, `cli.done`), intercepted commands from guardrails, and role-partitioned token telemetry with high token density and offline resilience.
+- **Decision:** Implement `VictoriaLogsClient` and `TaskTraceAggregator` in `taskctl.telemetry.victorialogs` supporting LogsQL NDJSON queries with endpoint auto-resolution (`TASKCTL_VICTORIALOGS_URL`, `VICTORIALOGS_URL`). Wire `taskctl trace [XX.Y]` supporting positional task IDs (`02.8`, `[02.8]`), `--task`, `--id`, and `--last`. Provide seamless local fallback to in-memory spans, `.agent/.cache/active_trace.json`, and local session transcripts when offline, returning exit code 0.
+- **Consequences:** End-to-end task cycle observability, zero external dependency crashes, and structured JSON export for automated verification.
+
 ---
 
 ## Active Contracts
@@ -128,7 +133,7 @@
 | `taskctl stage verify` | `taskctl` | CI / Worktree Runners / Multi-Agent | Stage merge & disjoint scope verification; Exit codes: `0: APPROVED`, `1: CHANGES REQUIRED`, `2: ERROR` |
 | `taskctl recall` | `taskctl` | CLI / Developer / Agents | FTS5 BM25 Ranked Knowledge Cards (terminal card list, `--detailed`, or JSON) |
 | `taskctl reflex` | `taskctl` | CLI / `agent-guard` / CI | Error signature matching & immediate solution prescription |
-| `taskctl trace` | `taskctl` | CLI / CI / Developer | ASCII Waterfall Tree, Trace Spans JSON, or SLA duration analytics |
+| `taskctl trace` | `taskctl` | CLI / CI / Developer | Aggregated Cycle Timeline Waterfall, Blocked Commands, Token Summary, JSON |
 | `taskctl daemon` / `broadcast` | `taskctl` | Vector / Canvas / Webhook | Aggregated Cross-Repo Workspace Events & Status Summary |
 | `WebhookDispatcher` | `taskctl` | Telemetry Endpoint | Generic JSON `taskctl/schemas/v1/webhook-event.schema.json` v1.0.0; Discord and Slack adapters are separate |
 | `VectorSink` | `taskctl` | Vector HTTP Ingestion (`:8686/logs`) | Canonical VictoriaLogs JSON (`taskctl/schemas/v1/vector-event.schema.json` v1.0.0) |
