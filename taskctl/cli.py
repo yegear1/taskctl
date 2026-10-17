@@ -402,6 +402,24 @@ def cmd_quota(refresh: bool = False):
     print(f"Optimal Allocation: Profile '{best_p}' -> {best_m}")
     print(f"Reason: {reason}\n")
 
+    try:
+        from maestri_core.telemetry.webhooks import MultiSinkWebhookDispatcher
+        multi_webhook = MultiSinkWebhookDispatcher()
+        if multi_webhook.is_configured():
+            alert_threshold = float(os.environ.get("TASKCTL_QUOTA_ALERT_THRESHOLD", "0.20"))
+            for p, q in quotas.items():
+                rem_frac = q.get("buckets", {}).get("gemini", {}).get("remaining_fraction", 0.0)
+                if rem_frac < alert_threshold:
+                    reset_time = q.get("buckets", {}).get("gemini", {}).get("reset_time", "N/A")
+                    multi_webhook.send_quota_alert(
+                        profile=p,
+                        remaining_fraction=rem_frac,
+                        reset_time=reset_time,
+                        optimal_route=f"{best_p} -> {best_m}",
+                    )
+    except Exception:
+        pass
+
 def cmd_next(
     weight: str = "medium",
     target_agent: Optional[str] = None,
@@ -807,6 +825,26 @@ def cmd_audit(
                 ],
             },
         )
+
+        try:
+            from maestri_core.telemetry.webhooks import MultiSinkWebhookDispatcher
+            multi_webhook = MultiSinkWebhookDispatcher()
+            if multi_webhook.is_configured():
+                multi_webhook.send_audit_alert(
+                    status=verdict.status,
+                    task_id=active_task.get("id", "XX.Y"),
+                    title=active_task.get("title", "Ad-hoc task"),
+                    details={
+                        "exit_code": verdict.exit_code,
+                        "rule_count": len(verdict.results),
+                        "hybrid": delegate,
+                        "agent": agent_name,
+                        "repo": repo_path.name,
+                        "repo_path": str(repo_path),
+                    },
+                )
+        except ImportError:
+            pass
 
         get_telemetry_emitter().emit_lifecycle_event(
             event_type="audit",
@@ -1359,25 +1397,37 @@ def cmd_sync(pull: bool = False, hud: bool = False):
         )
     print("="*58 + "\n")
 
-def cmd_notify(msg: str):
+def cmd_notify(msg: str, sink: str = "all"):
     canvas_ok = send_canvas_notification(msg)
-    webhook = WebhookDispatcher()
     hook_ok = False
-    if webhook.is_configured():
-        hook_ok = webhook.send_event(
-            event_type="notification",
-            task_id="MANUAL",
-            title=msg,
-            status="INFO",
-            details={"summary": msg}
-        )
+
+    multi_dispatcher = None
+    try:
+        from maestri_core.telemetry.webhooks import MultiSinkWebhookDispatcher
+        multi_dispatcher = MultiSinkWebhookDispatcher()
+    except ImportError:
+        pass
+
+    if multi_dispatcher and multi_dispatcher.is_configured():
+        hook_results = multi_dispatcher.send_notification(msg, target_sink=sink)
+        hook_ok = any(hook_results.values())
+    else:
+        webhook = WebhookDispatcher()
+        if webhook.is_configured():
+            hook_ok = webhook.send_event(
+                event_type="notification",
+                task_id="MANUAL",
+                title=msg,
+                status="INFO",
+                details={"summary": msg}
+            )
 
     get_telemetry_emitter().emit_lifecycle_event(
         event_type="notification",
         task_id="MANUAL",
         message=msg,
         status="INFO",
-        details={"summary": msg, "canvas_notified": canvas_ok, "webhook_sent": hook_ok},
+        details={"summary": msg, "canvas_notified": canvas_ok, "webhook_sent": hook_ok, "sink": sink},
     )
     print(f"[OK] Notification dispatched (Canvas: {'sent' if canvas_ok else 'skipped'}, Webhook: {'sent' if hook_ok else 'skipped/not configured'}).")
 
@@ -2397,8 +2447,22 @@ def main():
         hud = "--hud" in sys.argv[2:]
         cmd_sync(pull=pull, hud=hud)
     elif cmd == "notify":
-        msg = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Test notification"
-        cmd_notify(msg)
+        args = sys.argv[2:]
+        sink = "all"
+        msg_parts = []
+        i = 0
+        while i < len(args):
+            if args[i] in ["--sink", "-s"] and i + 1 < len(args):
+                sink = args[i + 1]
+                i += 2
+            else:
+                msg_parts.append(args[i])
+                i += 1
+        msg = " ".join(msg_parts) if msg_parts else "Test notification"
+        if sink != "all":
+            cmd_notify(msg, sink=sink)
+        else:
+            cmd_notify(msg)
     elif cmd in ["lint-commit", "commit-lint"]:
         file_path = None
         rev = None
