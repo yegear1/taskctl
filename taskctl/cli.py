@@ -589,6 +589,9 @@ def cmd_audit(
     domain_lint: bool = False,
     fix: bool = False,
     repo: Optional[str] = None,
+    visual: bool = False,
+    portal: Optional[str] = None,
+    tolerance: float = 0.05,
 ) -> int:
     from pathlib import Path
     try:
@@ -627,6 +630,103 @@ def cmd_audit(
             domain_lint=domain_lint_on,
         )
         verdict = auditor.run(repo_path)
+
+        if visual:
+            print("="*58)
+            print(" 🖼️  VISUAL PORTAL AUDIT ENGINE (--visual)")
+            print("="*58)
+            portal_target = portal or "Web Preview"
+            visual_dir = repo_path / ".agent" / "visual"
+            screenshots_dir = visual_dir / "screenshots"
+            baselines_dir = visual_dir / "baselines"
+            diffs_dir = visual_dir / "diffs"
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+            baselines_dir.mkdir(parents=True, exist_ok=True)
+            diffs_dir.mkdir(parents=True, exist_ok=True)
+
+            portal_slug = portal_target.lower().replace(" ", "_")
+            baseline_file = baselines_dir / f"{portal_slug}_baseline.png"
+            diff_output_file = diffs_dir / f"{portal_slug}_diff_{int(time.time())}.png"
+
+            try:
+                from maestri_core.canvas.visual import (
+                    capture_portal_screenshot,
+                    compare_images,
+                    format_visual_audit_markdown,
+                    append_visual_audit_to_report,
+                    VisualDiffResult,
+                )
+            except ImportError:
+                capture_portal_screenshot = None  # type: ignore
+
+            if capture_portal_screenshot is None:
+                print(" ⚠️  [WARN] maestri_core.canvas.visual module not found; skipping visual snapshot.")
+            else:
+                current_screenshot = capture_portal_screenshot(
+                    portal_target=portal_target,
+                    output_dir=str(screenshots_dir),
+                    output_filename=f"{portal_slug}_{int(time.time())}.png",
+                )
+
+                if not current_screenshot:
+                    print(f" ⚠️  [WARN] Failed to capture screenshot from canvas portal '{portal_target}'.")
+                    print("     Ensure Maestri is active and the portal node exists.")
+                else:
+                    print(f" 📸 Captured Portal Snapshot: {current_screenshot}")
+                    if not baseline_file.exists():
+                        # Set initial baseline
+                        shutil.copy2(current_screenshot, baseline_file)
+                        diff_res = VisualDiffResult(
+                            portal_name=portal_target,
+                            baseline_path=str(baseline_file.resolve()),
+                            candidate_path=str(Path(current_screenshot).resolve()),
+                            diff_image_path=None,
+                            diff_percent=0.0,
+                            tolerance_percent=tolerance * 100.0,
+                            passed=True,
+                            dimensions=(0, 0),
+                            total_pixels=0,
+                            mismatched_pixels=0,
+                            is_initial_baseline=True,
+                        )
+                        print(f" 🆕 Initial Baseline Established: {baseline_file}")
+                    else:
+                        diff_res = compare_images(
+                            baseline_path=str(baseline_file),
+                            candidate_path=current_screenshot,
+                            portal_name=portal_target,
+                            tolerance_percent=tolerance,
+                            diff_output_path=str(diff_output_file),
+                        )
+                        status_str = "PASS" if diff_res.passed else "DRIFT DETECTED"
+                        print(f" 🔍 Visual Diff: {diff_res.diff_percent:.2f}% (Tolerance: {diff_res.tolerance_percent:.2f}%) -> [{status_str}]")
+                        if diff_res.diff_image_path:
+                            print(f" 🗺️  Diff Map Generated: {diff_res.diff_image_path}")
+
+                    # Format and append visual audit section to AUDIT_REPORT.md
+                    visual_md = format_visual_audit_markdown(
+                        [diff_res],
+                        task_id=active_task.get("id", "XX.Y"),
+                    )
+                    report_file = repo_path / "AUDIT_REPORT.md"
+                    append_visual_audit_to_report(report_file, visual_md)
+                    sync_audit_report_note(visual_md, note_title="audit-report")
+                    print(f" 📝 Visual report synced to {report_file.name} and canvas note 'audit-report'.")
+
+                    if not diff_res.passed:
+                        # Escalates verdict to CHANGES_REQUIRED if visual drift detected
+                        verdict.exit_code = max(verdict.exit_code, 1)
+                        if verdict.status == "APPROVED":
+                            verdict.status = "CHANGES REQUIRED"
+                        verdict.results.append(
+                            RuleResult(
+                                rule_name="visual-portal-diff",
+                                severity=AuditSeverity.CHANGES_REQUIRED,
+                                message=f"Visual portal drift detected on '{portal_target}': {diff_res.diff_percent:.2f}% > {diff_res.tolerance_percent:.2f}% tolerance.",
+                                details=diff_res.to_dict(),
+                            )
+                        )
+            print("-" * 58 + "\n")
 
         auto_fixed: List[str] = []
         if fix and verdict.exit_code != 0:
@@ -2200,6 +2300,9 @@ def main():
         domain_lint = False
         fix = False
         repo = None
+        visual = False
+        portal = None
+        tolerance = 0.05
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -2212,6 +2315,19 @@ def main():
             elif args[i] in ["--fix", "-f"]:
                 fix = True
                 i += 1
+            elif args[i] in ["--visual", "-v"]:
+                visual = True
+                i += 1
+            elif args[i] in ["--portal", "-p"] and i + 1 < len(args):
+                portal = args[i + 1]
+                visual = True
+                i += 2
+            elif args[i] in ["--tolerance", "-t"] and i + 1 < len(args):
+                try:
+                    tolerance = float(args[i + 1])
+                except ValueError:
+                    tolerance = 0.05
+                i += 2
             elif args[i] in ["--agent", "-a"] and i + 1 < len(args):
                 agent_name = args[i + 1]
                 delegate = True
@@ -2221,7 +2337,23 @@ def main():
                 i += 2
             else:
                 i += 1
-        sys.exit(cmd_audit(delegate=delegate, agent_name=agent_name, domain_lint=domain_lint, fix=fix, repo=repo))
+        audit_kwargs = {}
+        if visual:
+            audit_kwargs["visual"] = True
+        if portal is not None:
+            audit_kwargs["portal"] = portal
+        if tolerance != 0.05:
+            audit_kwargs["tolerance"] = tolerance
+        sys.exit(
+            cmd_audit(
+                delegate=delegate,
+                agent_name=agent_name,
+                domain_lint=domain_lint,
+                fix=fix,
+                repo=repo,
+                **audit_kwargs,
+            )
+        )
     elif cmd == "done":
         promote = False
         custom_msg = None
