@@ -217,6 +217,54 @@ def render_dashboard(
             msg_str += f" ({item.details})"
         lines.append(box_line(f" {badge} {name_str} : {msg_str}"))
 
+    # --- MODEL & TRINITY TOKEN TELEMETRY PANEL ---
+    lines.append(border_mid())
+    header_tok = "📊 MODEL & TRINITY TOKEN TELEMETRY"
+    if color:
+        header_tok = f"{Ansi.BOLD}{Ansi.CYAN}{header_tok}{Ansi.RESET}"
+    lines.append(box_line(header_tok))
+
+    if state.model_token_metrics:
+        for m in state.model_token_metrics[:4]:
+            role = m.get("role", "Agent")
+            mod = m.get("model_name", "gemini")
+            prof = m.get("profile", "default")
+            tot = m.get("total_tokens", 0)
+            turns = m.get("turns", 0)
+            tot_k = f"{tot / 1000.0:.1f}k" if tot >= 1000 else str(tot)
+            if color:
+                line_str = f"  • {Ansi.BOLD}{role:<12}{Ansi.RESET} [{Ansi.YELLOW}{mod:<22}{Ansi.RESET}] ({prof}) : {Ansi.GREEN}{tot_k:>7}{Ansi.RESET} tok ({turns} turns)"
+            else:
+                line_str = f"  • {role:<12} [{mod:<22}] ({prof}) : {tot_k:>7} tok ({turns} turns)"
+            lines.append(box_line(line_str))
+    else:
+        lines.append(box_line("  (No token telemetry recorded yet)"))
+
+    # --- RECENT EVENT STREAM PANEL ---
+    lines.append(border_mid())
+    vl_badge = f"{Ansi.GREEN}ONLINE{Ansi.RESET}" if state.victorialogs_status == "online" else f"{Ansi.YELLOW}LOCAL FALLBACK{Ansi.RESET}"
+    if not color:
+        vl_badge = "ONLINE" if state.victorialogs_status == "online" else "LOCAL FALLBACK"
+    header_stream = f"🪵 RECENT EVENT STREAM (VictoriaLogs: {vl_badge})"
+    if color:
+        header_stream = f"{Ansi.BOLD}{Ansi.MAGENTA}{header_stream}{Ansi.RESET}"
+    lines.append(box_line(header_stream))
+
+    if state.recent_events:
+        for ev in state.recent_events[:4]:
+            ts = ev.get("timestamp", "")
+            lvl = ev.get("level", "INFO")
+            comp = ev.get("component", "system")
+            msg = ev.get("message", "")
+            if color:
+                lvl_color = Ansi.RED if lvl in ("ERROR", "FAIL") else (Ansi.YELLOW if lvl == "WARN" else Ansi.CYAN)
+                line_str = f"  • {Ansi.DIM}{ts}{Ansi.RESET} {lvl_color}[{lvl:<4}]{Ansi.RESET} {Ansi.BOLD}{comp:<14}{Ansi.RESET} : {msg}"
+            else:
+                line_str = f"  • {ts} [{lvl:<4}] {comp:<14} : {msg}"
+            lines.append(box_line(line_str))
+    else:
+        lines.append(box_line("  (No recent lifecycle events)"))
+
     # --- GIT WORKSPACE STATUS PREVIEW ---
     lines.append(border_mid())
     header_ws = f"📂 WORKSPACE HYGIENE ({'Clean' if state.git_clean else f'{state.staged_count} staged, {state.unstaged_count} modified, {state.untracked_count} untracked'})"
@@ -322,7 +370,12 @@ def _render_split_dashboard(
         name_str = f"{item.name:<18}"
         if color:
             name_str = f"{Ansi.BOLD}{name_str}{Ansi.RESET}"
-        left_lines.append(f" {badge} {name_str}")
+        if col1 >= 40:
+            msg_rem = max(10, col1 - 28)
+            msg_snippet = item.message[:msg_rem]
+            left_lines.append(f" {badge} {name_str} : {msg_snippet}")
+        else:
+            left_lines.append(f" {badge} {name_str}")
 
     left_lines.append("─" * col1)
 
@@ -344,31 +397,81 @@ def _render_split_dashboard(
             else:
                 left_lines.append(f"  {code} {fname}")
 
-    # Right column (Diff viewer)
+    # Right column (Multi-panel: Tokens, Event Stream, Diff viewer)
     right_lines: List[str] = []
+
+    # 1. Model & Trinity Token Telemetry
+    tok_hdr = "📊 MODEL & TRINITY TOKEN TELEMETRY"
+    if color:
+        tok_hdr = f"{Ansi.BOLD}{Ansi.CYAN}{tok_hdr}{Ansi.RESET}"
+    right_lines.append(tok_hdr)
+
+    if state.model_token_metrics:
+        for m in state.model_token_metrics[:3]:
+            role = m.get("role", "Agent")
+            mod = m.get("model_name", "gemini")
+            tot = m.get("total_tokens", 0)
+            turns = m.get("turns", 0)
+            tot_k = f"{tot / 1000.0:.1f}k" if tot >= 1000 else str(tot)
+            if color:
+                r_str = f"  • {Ansi.BOLD}{role:<9}{Ansi.RESET} [{Ansi.YELLOW}{mod[:15]}{Ansi.RESET}]: {Ansi.GREEN}{tot_k:>6}{Ansi.RESET} tok ({turns}t)"
+            else:
+                r_str = f"  • {role:<9} [{mod[:15]}]: {tot_k:>6} tok ({turns}t)"
+            right_lines.append(r_str)
+    else:
+        right_lines.append("  (No token telemetry recorded)")
+
+    right_lines.append("─" * col2)
+
+    # 2. Event Stream (VictoriaLogs / Trace Fallback)
+    vl_badge = f"{Ansi.GREEN}ONLINE{Ansi.RESET}" if state.victorialogs_status == "online" else f"{Ansi.YELLOW}LOCAL{Ansi.RESET}"
+    if not color:
+        vl_badge = "ONLINE" if state.victorialogs_status == "online" else "LOCAL"
+    stream_hdr = f"🪵 RECENT EVENTS [VL: {vl_badge}]"
+    if color:
+        stream_hdr = f"{Ansi.BOLD}{Ansi.MAGENTA}{stream_hdr}{Ansi.RESET}"
+    right_lines.append(stream_hdr)
+
+    if state.recent_events:
+        for ev in state.recent_events[:3]:
+            ts = ev.get("timestamp", "")
+            if len(ts) >= 19:
+                ts = ts[11:19]
+            elif len(ts) > 8:
+                ts = ts[-8:]
+            lvl = ev.get("level", "INFO")
+            comp = ev.get("component", "system")
+            msg = ev.get("message", "")
+            max_msg_len = max(10, col2 - 26)
+            if color:
+                lvl_color = Ansi.RED if lvl in ("ERROR", "FAIL") else (Ansi.YELLOW if lvl == "WARN" else Ansi.CYAN)
+                ev_str = f"  {Ansi.DIM}{ts}{Ansi.RESET} {lvl_color}[{lvl[:4]}]{Ansi.RESET} {Ansi.BOLD}{comp[:10]}{Ansi.RESET}: {msg[:max_msg_len]}"
+            else:
+                ev_str = f"  {ts} [{lvl[:4]}] {comp[:10]}: {msg[:max_msg_len]}"
+            right_lines.append(ev_str)
+    else:
+        right_lines.append("  (Zero recent trace events)")
+
+    right_lines.append("─" * col2)
+
+    # 3. Git Diff Viewer
     diff_lines = state.git_diff_lines
     total_diff = len(diff_lines)
 
-    target_body_rows = max(len(left_lines), 14)
-    max_diff_rows = max(4, target_body_rows - 2)
+    target_body_rows = max(len(left_lines), 16)
+    used_right_rows = len(right_lines) + 2
+    max_diff_rows = max(3, target_body_rows - used_right_rows)
 
     if total_diff == 0:
         diff_hdr = "📄 GIT DIFF PREVIEW [Clean]"
         if color:
             diff_hdr = f"{Ansi.BOLD}{Ansi.CYAN}{diff_hdr}{Ansi.RESET}"
         right_lines.append(diff_hdr)
-        right_lines.append("")
-        msg_clean1 = "  Working tree clean."
-        msg_clean2 = "  Zero uncommitted changes to diff."
-        msg_clean3 = "  Edit files to see real-time diffs."
+        msg_clean = "  Working tree clean. Zero diff."
         if color:
-            right_lines.append(f"{Ansi.DIM}{msg_clean1}{Ansi.RESET}")
-            right_lines.append(f"{Ansi.DIM}{msg_clean2}{Ansi.RESET}")
-            right_lines.append(f"{Ansi.DIM}{msg_clean3}{Ansi.RESET}")
+            right_lines.append(f"{Ansi.DIM}{msg_clean}{Ansi.RESET}")
         else:
-            right_lines.append(msg_clean1)
-            right_lines.append(msg_clean2)
-            right_lines.append(msg_clean3)
+            right_lines.append(msg_clean)
     else:
         max_offset = max(0, total_diff - max_diff_rows)
         offset = max(0, min(diff_scroll_offset, max_offset))
@@ -399,7 +502,7 @@ def _render_split_dashboard(
         if total_diff > max_diff_rows:
             above = offset
             below = total_diff - end_idx
-            scroll_info = f"▲ {above} above │ {below} below ▼ (Wheel/j/k)"
+            scroll_info = f"▲ {above} above │ {below} below ▼"
             if color:
                 scroll_info = f"{Ansi.DIM}{scroll_info}{Ansi.RESET}"
             right_lines.append(scroll_info)

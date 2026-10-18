@@ -66,8 +66,9 @@ class TestTuiState(unittest.TestCase):
                 MagicMock(returncode=0, stdout=" M file1.py\n?? file2.py\n"),
                 MagicMock(returncode=0, stdout=""),
             ]
-            is_clean, staged, unstaged, untracked, preview, diff_clean, _ = _check_git_workspace(self.test_dir)
+            is_clean, staged, unstaged, untracked, preview, diff_clean, _, status_lines = _check_git_workspace(self.test_dir)
             self.assertFalse(is_clean)
+            self.assertEqual(len(status_lines), 2)
             self.assertEqual(staged, 0)
             self.assertEqual(unstaged, 1)
             self.assertEqual(untracked, 1)
