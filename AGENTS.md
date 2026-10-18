@@ -25,14 +25,26 @@ The agent MUST minimize default token load by following progressive disclosure:
 - **Default Context (Loaded on start):** `AGENTS.md`, `.agent/TASK.md`, `.agent/NOTES.md`.
 - **Architectural Decisions (`.agent/adr/`):** MUST load when creating new packages, altering CLI design, or changing boundary models.
 - **Multi-Repo Ecosystem (`.agent/ECOSYSTEM.md`):** MUST load when modifying contracts, external provider adapters (`maestri`, `multigravity`), or webhook payloads.
+- **Knowledge Base (`.agent/knowledge/`):** MUST load via `taskctl knowledge search` or file inspection when troubleshooting tricky runtime bugs, gotchas, or platform quirks.
 - **Domain Skills (`.agent/skills/<name>/SKILL.md`):** MUST load only when the active task touches that skill's trigger (`cli-command`, `provider-adapter`).
 
 ---
 
-## Execution Protocol
+## Execution Protocol & Modes
 
 1. Read `AGENTS.md`, `.agent/TASK.md`, and `.agent/NOTES.md` before editing any files.
-2. **Plan first:** Set `Status` in `.agent/TASK.md` to `PLANNING`; present plan; await approval; then set to `RUNNING`.
+2. **Execution Modes:**
+   - **Fast-Path (Ad-Hoc & Operational Requests):**
+     Do NOT create, number, or log a task in `.agent/TASK.md`, and do NOT create plans when the request:
+     - Is an ad-hoc or operational utility command (e.g., checking status, running tests).
+     - Is trivially simple or a minor localized adjustment (e.g., fixing a typo, renaming a local variable).
+     - Is investigatory, conversational, or read-only (e.g., questions, diff inspection, log checks).
+     Execute these requests **immediately and directly** without interrupting the user.
+   - **Plan-First Workflow (Tracked Roadmap Tasks):**
+     Applies to substantive repository changes, architectural updates, multi-file features, or CLI subcommands:
+     - Update `Status` in `.agent/TASK.md` to `PLANNING`.
+     - Present a detailed action plan and await approval.
+     - Upon approval, update `Status` to `RUNNING`.
 3. Work on exactly ONE active task at a time.
 4. **Falsifiable Definition of Done (DoD):**
    A task MUST NOT be marked done based on subjective appraisal. It MUST satisfy:
@@ -40,6 +52,7 @@ The agent MUST minimize default token load by following progressive disclosure:
    - [ ] **Automated Tests:** `python3 -m unittest discover tests` exits 0.
    - [ ] **Git Cleanliness:** `git diff --check` exits 0 (no conflict markers, trailing whitespace, or uncommitted cruft).
    - [ ] **Atomic Conventional Commits:** Double-commit pattern (feature commit followed by governance commit in `.agent/TASK.md`).
+   - [ ] **Knowledge Preservation:** Document obscure runtime gotchas or workarounds as an atomic card in `.agent/knowledge/` (if applicable).
    - [ ] **Task Log:** Active task logged in `.agent/TASK.md` with commit hash; next task promoted.
 
 ---
@@ -95,3 +108,56 @@ When releasing `vX.Y.Z`:
 - **Runtime:** Python >= 3.10 (Standard Library + modular setuptools packaging).
 - **Test Framework:** `unittest` (hermetic, zero required network calls).
 - **Package Manager:** `pip` / `pyproject.toml` (PEP 517/518/621).
+
+---
+
+## Dependency & Architecture Governance
+
+### Consultative Dependency & Architectural Trade-offs
+When a non-trivial capability is required that is standardly addressed by established open-source libraries:
+- **Do NOT** silently invent complex in-house logic from scratch using stdlib to avoid asking.
+- **Do NOT** install dependencies or unapproved package managers without explicit user permission.
+- **Recommend** the standard, battle-tested library in the implementation plan alongside a zero-dependency/stdlib alternative.
+- **Document trade-offs:** maintenance burden, security attack surface, bundle/binary size impact, and ecosystem maturity.
+- **Await explicit user decision** before adding dependencies to project configurations.
+
+### Dependency & Runtime Versioning
+When selecting libraries, frameworks, runtimes, or base images:
+- **Default to Latest Stable / LTS:** Select the newest generally available (GA) stable release as of the current date, favoring active LTS (Long-Term Support) versions for foundational runtimes and base images.
+- **Prohibit Pre-releases:** MUST NOT adopt `alpha`, `beta`, `rc`, `preview`, or `canary` releases unless explicitly requested by the user.
+- **Preserve Compatibility:** Existing peer dependencies and project invariants take precedence over latest major versions.
+- **Verify Registry State:** Use official CLI commands (e.g., `pip index versions <pkg>`) or documentation rather than relying on model training cutoff assumptions.
+
+---
+
+## Code Quality & Contrast Pairs
+
+Functions SHOULD remain concise (typically under 50 lines of code) with low cognitive complexity and no more than 2–3 levels of indentation (use early returns and guard clauses). Purely declarative constructs (schemas, mapping tables, test suites) are exempt from arbitrary line limits. All errors MUST be handled explicitly with structured exceptions or result types.
+
+### Contrast Pairs (DO / DON'T)
+
+```python
+# BAD: Deeply nested indentation and tangled logic
+def process_task(task):
+    if task.is_valid:
+        if task.has_steps:
+            if task.is_ready:
+                return execute(task)
+
+# GOOD: Guard clauses, flat indentation, and early exit
+def process_task(task: Task) -> ExecutionResult:
+    if not task.is_valid:
+        raise ValidationError("Invalid task contract")
+    if not task.has_steps:
+        raise EmptyTaskError("Task has no criteria")
+    if not task.is_ready:
+        raise TaskNotReadyError("Task dependencies not satisfied")
+
+    return execute(task)
+```
+
+---
+
+## Language & Communication Protocol
+- **Agent Directives & Contracts:** All agent-facing directives, skills, contracts, ADRs, and task logs (`AGENTS.md`, `.agent/*`) MUST be written in concise Technical English to optimize context token density and model instruction fidelity.
+- **Human-Facing Localizations:** User-facing documentation (e.g. `README.pt-br.md`) may be localized.

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-18
+
+### Added
+- **TUI Split Cockpit Enhancements**: Real-time Definition of Done (DoD) checks, system invariant inspection (ephemeral sockets, exposed credentials), diff hygiene scanner, role & model token telemetry breakdown, and recent event stream.
+- **VictoriaLogs LogsQL Distributed Tracing**: CLI `taskctl trace [XX.Y]` command querying VictoriaLogs, lifecycle context propagation (`MAESTRI_TRACE_ID` in `taskctl next` & `taskctl done`), and span duration timeline breakdown.
+- **Knowledge Cards Engine**: SQLite FTS5 / BM25 knowledge engine and CLI subcommands (`taskctl knowledge index/search/query`) with `.agent/knowledge/` scaffolding (`000-schema.md`, `k-000-template.md`).
+- **DAG Stage Merge & Dynamic Worktree Isolation**: Automated worktree provisioning (`.taskctl/worktrees/`), multi-task merge conflict verification (`taskctl graph --verify-stages`), and agnostic execution plan export (`taskctl graph --export-plan`).
+- **Pluggable Runner Architecture**: Abstract runner abstraction in `taskctl next --runner` with dedicated adapters for Maestri, Multigravity, Codex, and Custom runners.
+- **Multi-Repository Context Firewall**: Global `--repo <path|name>` flag across all CLI subcommands (`status`, `plan`, `next`, `audit`, `done`) for remote worktree auditing and context boundary protection.
+- **Dynamic Multigravity Routing**: Profile quota balancing, model target resolution, and dynamic discovery integration (`multigravity route`).
+- **Upstream Governance v1.0.0 Alignment**: Fast-Path vs Plan-First execution workflows, Consultative Dependency & LTS/Stable Versioning policies, and Code Quality contrast pairs in `AGENTS.md`.
+
 ## [0.1.0] - 2026-10-03
 
 ### Added

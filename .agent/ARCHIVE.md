@@ -5,6 +5,27 @@
 
 ---
 
+## [v0.2.0] - 2026-10-18
+
+| Task | Title | Commit(s) | Date |
+|---|---|---|---|
+| [99.1] | Release Wrap-up & Governance Alignment v0.2.0 (v1.0.0 Template Sync) | pending | 2026-10-18 |
+| [02.10] | TUI Split Cockpit: Real-Time DoD Invariant Checks & Token Telemetry | [`d37b09e`] | 2026-10-18 |
+| [02.9] | CLI `taskctl trace [XX.Y]` (VictoriaLogs LogsQL Aggregation) | [`011263e`] | 2026-10-17 |
+| [02.8] | Context Propagation & Trace Genesis (`MAESTRI_TRACE_ID` in `taskctl next` & `taskctl done` lifecycle spans to VictoriaLogs) | [`1cfdb28`] | 2026-10-17 |
+| [02.7] | Knowledge Cards Engine (SQLite FTS5 / BM25) & CLI Subcommands | [`e97b9d2`] | 2026-10-17 |
+| [02.6] | Dynamic worktree isolation and branch merge verification for DAG execution stages | [`96c47c2`] | 2026-10-14 |
+| [02.5] | Export agnostic DAG execution plan (`taskctl graph --export-plan`) for concurrent worktree runners | [`e962fbd`] | 2026-10-14 |
+| [02.4] | Abstract Runner Layer in `taskctl next` with pluggable runner adapters (`--runner <maestri|multigravity|codex|custom>`) | [`1257c73`] | 2026-10-14 |
+| [02.3] | Decouple static profiles and dynamic routing in Multigravity provider (`route_target` dynamic discovery / `multigravity route` integration) | [`1bfe178`] | 2026-10-14 |
+| [02.2] | Add `--repo <path|name>` flag across `taskctl` commands (`status`, `plan`, `next`, `audit`, `done`) for multi-repository context firewall and remote worktree auditing | [`2ab2b6c`] | 2026-10-14 |
+| [02.1] | Add opt-in domain lint rules to the Scope Auditor beyond `git diff --check` | [`adc97f6`] | 2026-10-04 |
+| [01.2] | Publish a versioned JSON schema for webhook and Vector telemetry payloads | [`983b7a9`] | 2026-10-04 |
+| [01.1] | Align webhook dispatcher with the fail-safe timeout contract | [`fbc9fe3`] | 2026-10-04 |
+| [00.1] | Post-release perimeter sync and backlog roadmap planning | [`ef0e5b6`] | 2026-10-04 |
+
+---
+
 ## [v0.1.0] - 2026-10-03
 
 | Task | Title | Commit(s) | Date |
