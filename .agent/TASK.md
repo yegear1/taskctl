@@ -7,17 +7,22 @@
 
 ## Active Task
 
-### 📌 Task [XX.Y]: [Short descriptive title]
+### 📌 Task [99.1]: Release Wrap-up & Governance Alignment v0.2.0 (v1.0.0 Template Sync)
 
-- **Description:** [Brief description of the next task]
-- **Systems Involved:** [e.g. taskctl.core, taskctl.cli]
+- **Description:** Execute release wrap-up for cycle v0.2.0: archive completed tasks to ARCHIVE.md, sync .agent/knowledge scaffolding and AGENTS.md operational clauses from template-agent v1.0.0, sync perimeter files, and reset task numbering for Epic 03.
+- **Systems Involved:** AGENTS.md, .agent/TASK.md, .agent/ARCHIVE.md, .agent/knowledge/, CHANGELOG.md
 - **Action Type:**
-  - [ ] Read-only / Documentation
-  - [ ] Source code changes
-- **Status:** READY FOR PLANNING
+  - [x] Read-only / Documentation
+  - [x] Source code changes
+- **Status:** RUNNING
 
 ### Acceptance Criteria
-- [ ] Criterion 1
+- [ ] Add `.agent/knowledge/000-schema.md` and `.agent/knowledge/k-000-template.md` from `template-agent` v1.0.0.
+- [ ] Update `AGENTS.md` with Fast-Path vs Plan-First, Consultative Dependencies & LTS/Stable versioning, and Code Quality contrast pairs.
+- [ ] Archive completed tasks from `TASK.md` to `ARCHIVE.md` under `## [v0.2.0] - 2026-10-18`.
+- [ ] Update `CHANGELOG.md` with v0.2.0 release notes.
+- [ ] Tag git commit `v0.2.0`.
+- [ ] Reset `TASK.md` active task to `[03.1]: READY FOR PLANNING`.
 
 ---
 
@@ -25,6 +30,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
+| [02.10] | TUI Split Cockpit: Real-Time DoD Invariant Checks & Token Telemetry | [`d37b09e`] | 2026-10-18 |
 | [02.9] | CLI `taskctl trace [XX.Y]` (VictoriaLogs LogsQL Aggregation) | [`011263e`] | 2026-10-17 |
 | [02.8] | Context Propagation & Trace Genesis (`MAESTRI_TRACE_ID` in `taskctl next` & `taskctl done` lifecycle spans to VictoriaLogs) | [`1cfdb28`] | 2026-10-17 |
 | [02.7] | Knowledge Cards Engine (SQLite FTS5 / BM25) & CLI Subcommands | [`e97b9d2`] | 2026-10-17 |
