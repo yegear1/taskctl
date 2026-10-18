@@ -9,7 +9,7 @@
 
 | Task | Title | Commit(s) | Date |
 |---|---|---|---|
-| [99.1] | Release Wrap-up & Governance Alignment v0.2.0 (v1.0.0 Template Sync) | pending | 2026-10-18 |
+| [99.1] | Release Wrap-up & Governance Alignment v0.2.0 (v1.0.0 Template Sync) | [`f2f9595`] | 2026-10-18 |
 | [02.10] | TUI Split Cockpit: Real-Time DoD Invariant Checks & Token Telemetry | [`d37b09e`] | 2026-10-18 |
 | [02.9] | CLI `taskctl trace [XX.Y]` (VictoriaLogs LogsQL Aggregation) | [`011263e`] | 2026-10-17 |
 | [02.8] | Context Propagation & Trace Genesis (`MAESTRI_TRACE_ID` in `taskctl next` & `taskctl done` lifecycle spans to VictoriaLogs) | [`1cfdb28`] | 2026-10-17 |
