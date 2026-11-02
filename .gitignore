@@ -56,5 +56,6 @@ Thumbs.db
 
 # Multi-Agent Tooling & Orchestration
 .maestri/
+.multigravity/
 .agent/.cache/
 *.tsbuildinfo
