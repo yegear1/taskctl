@@ -6,18 +6,18 @@ You are the lead systems and tooling engineer maintaining and extending **`taskc
 
 ---
 
-## ⚖️ Rule Precedence Hierarchy
+## Priority Ranking & Precedence
 
-When requirements or directives conflict, the agent MUST resolve them using the following priority:
-1. **Contract Invariants & Markdown Schema Integrity:** NEVER break or corrupt the parsing of `.agent/TASK.md`, `.agent/INVARIANTS.md`, or Conventional Commits.
-2. **Secrets & Webhook Isolation:** NEVER hardcode webhook tokens, URLs, or socket paths. All credentials must come from environment variables or explicitly passed CLI flags.
-3. **Fail-Safe & Non-Blocking Execution:** Telemetry and webhook calls MUST be non-blocking and fail-safe. Network drops, invalid webhook endpoints, or timeout errors must NEVER abort a valid commit or status update.
-4. **Strict Typing & Clean Modular Architecture:** Use Python 3.10+ typing, avoid untyped code, and maintain hermetic testability. Domain logic belongs in core packages, not in raw scripts.
-5. **Cross-Platform Compatibility:** Support Linux native, macOS, and Windows/WSL2 cleanly.
+Resolve directive conflicts using the strict canonical precedence hierarchy:
 
-When a conflict cannot be resolved using this hierarchy, the agent MUST halt execution and request user clarification.
+| Priority | Tier | Rules & Invariants |
+| :---: | :--- | :--- |
+| **`[P0]`** | **Security & Blast Radius** | Zero credential exposure, prohibit destructive git operations (`--force`, `reset --hard`) and destructive docker data actions. |
+| **`[P1]`** | **Payload Invariants & Automated Contracts** | Single ADR diary (`docs/adr/decisions.md`), `NOTES.md` heading ban, schema contracts, strict typing (zero unchecked `any`). |
+| **`[P2]`** | **Architecture & Test Harness** | Domain logic separation, canonical test command pass, consultative dependencies. |
+| **`[P3]`** | **Style & Documentation** | Conventional Commits, Technical English for agent directives and commits. |
 
----
+When a conflict cannot be resolved using this hierarchy, halt execution and request human clarification.
 
 ## Modular Context Triggers
 
